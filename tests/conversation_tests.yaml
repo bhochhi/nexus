@@ -1,0 +1,45 @@
+tests:
+  - input: "What is my balance?"
+    expected_intent: check_balance
+
+  - input: "I want to file a claim"
+    expected_intent: file_claim
+
+  - input: "What are your hours?"
+    expected_intent: hours_of_operation
+
+  - input: "Transfer $200 to my savings account"
+    expected_intent: transfer_money
+
+  - input: "I see a charge I don't recognize"
+    expected_intent: report_fraud
+
+  - input: "How do I check my claim status?"
+    expected_intent: check_claim_status
+
+  - input: "I want to freeze my card"
+    expected_intent: freeze_card
+
+  - input: "What does my insurance cover?"
+    expected_intent: get_policy_details
+
+  - input: "How do I reset my password?"
+    expected_intent: reset_password
+
+  - input: "I need roadside assistance, my car broke down"
+    expected_intent: roadside_assistance
+
+  - input: "Show me my recent transactions"
+    expected_intent: view_transactions
+
+  - input: "I want to cancel my policy"
+    expected_intent: cancel_policy
+
+  - input: "How do I contact support?"
+    expected_intent: contact_support
+
+  - input: "Can I open a new savings account?"
+    expected_intent: open_account
+
+  - input: "I want to dispute a charge on my account"
+    expected_intent: dispute_transaction
