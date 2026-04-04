@@ -1,0 +1,27 @@
+name: conversation_agent
+
+goal: |
+  Handle all customer interactions across banking, insurance, and FAQs.
+
+capabilities:
+  - intent_detection
+  - response_generation
+  - tool_usage
+
+memory:
+  enabled: true
+
+skills:
+  - get_account_balance
+  - transfer_funds
+  - report_fraud
+  - check_claim_status
+  - file_claim
+  - get_policy_details
+  - answer_faq
+  - escalate_to_human
+
+instructions:
+  - follow global policies
+  - validate identity before sensitive actions
+  - prioritize clarity

@@ -1,0 +1,6 @@
+rules:
+  - Escalate to a human agent when confidence is below 0.7
+  - Escalate on any detected customer frustration or complaint
+  - Always inform the customer before transferring
+  - Provide estimated wait time if available
+  - Record the escalation reason in session memory

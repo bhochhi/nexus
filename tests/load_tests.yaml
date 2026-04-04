@@ -1,0 +1,21 @@
+load_tests:
+  - name: check_balance_concurrent
+    description: Simulate 100 concurrent balance check requests
+    endpoint: check_balance
+    concurrency: 100
+    duration_seconds: 60
+    expected_p99_latency_ms: 500
+
+  - name: transfer_funds_throughput
+    description: Measure throughput for fund transfers
+    endpoint: transfer_funds
+    concurrency: 50
+    duration_seconds: 60
+    expected_p99_latency_ms: 1000
+
+  - name: faq_high_volume
+    description: Simulate high volume FAQ traffic
+    endpoint: answer_faq
+    concurrency: 200
+    duration_seconds: 120
+    expected_p99_latency_ms: 300

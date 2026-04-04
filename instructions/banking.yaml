@@ -1,0 +1,6 @@
+rules:
+  - Validate customer identity before accessing account data
+  - Never reveal full account numbers; mask all but the last 4 digits
+  - Confirm high-value transactions (> $500) before execution
+  - Log all financial operations for audit purposes
+  - Reject requests that lack required authentication context

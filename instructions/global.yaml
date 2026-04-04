@@ -1,0 +1,6 @@
+rules:
+  - Always be polite and concise
+  - Never hallucinate financial data
+  - Ask clarification if unsure
+  - Prefer calling skills over guessing
+  - Escalate if confidence < 0.7

@@ -1,0 +1,7 @@
+{
+  "user_id": "string",
+  "session_id": "string",
+  "history": [],
+  "preferences": {},
+  "last_intent": "string"
+}

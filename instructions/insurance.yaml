@@ -1,0 +1,6 @@
+rules:
+  - Verify policy holder identity before disclosing claim details
+  - Collect all required information before submitting a claim
+  - Do not promise claim approval outcomes
+  - Always provide estimated processing times when available
+  - Escalate disputes or complex claims to a human agent

@@ -1,0 +1,70 @@
+intents:
+  - name: hours_of_operation
+    description: Ask about business hours
+    sample_utterances:
+      - "What are your hours?"
+      - "When are you open?"
+      - "What time do you close?"
+
+  - name: contact_support
+    description: Get contact information for customer support
+    sample_utterances:
+      - "How do I contact support?"
+      - "Give me your phone number"
+      - "How can I reach a representative?"
+
+  - name: reset_password
+    description: Reset account or application password
+    sample_utterances:
+      - "I forgot my password"
+      - "How do I reset my password?"
+      - "Help me log back in"
+
+  - name: app_help
+    description: Get help using the mobile app
+    sample_utterances:
+      - "How do I use the app?"
+      - "The app isn't working"
+      - "Where do I find my statements in the app?"
+
+  - name: website_help
+    description: Get help using the website
+    sample_utterances:
+      - "How do I navigate your website?"
+      - "I can't log in to the website"
+      - "Where is the account section on the site?"
+
+  - name: fees_info
+    description: Ask about fees and charges
+    sample_utterances:
+      - "What fees do you charge?"
+      - "Is there a monthly fee?"
+      - "How much does it cost to wire money?"
+
+  - name: eligibility
+    description: Ask about eligibility for products or services
+    sample_utterances:
+      - "Am I eligible for a loan?"
+      - "Who qualifies for this account?"
+      - "What are the requirements?"
+
+  - name: locations
+    description: Find branch or ATM locations
+    sample_utterances:
+      - "Where is the nearest branch?"
+      - "Find an ATM near me"
+      - "What locations do you have?"
+
+  - name: security_info
+    description: Ask about account security and fraud prevention
+    sample_utterances:
+      - "How do you protect my account?"
+      - "Is my data secure?"
+      - "What security measures do you use?"
+
+  - name: general_info
+    description: Ask general questions about the organization
+    sample_utterances:
+      - "Tell me about your services"
+      - "What products do you offer?"
+      - "Give me general information"
