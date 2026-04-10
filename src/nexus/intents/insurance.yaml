@@ -1,0 +1,70 @@
+intents:
+  - name: file_claim
+    description: File a new insurance claim
+    sample_utterances:
+      - "I want to file a claim"
+      - "I had an accident, how do I claim?"
+      - "Submit an insurance claim"
+
+  - name: check_claim_status
+    description: Check the status of an existing claim
+    sample_utterances:
+      - "What is the status of my claim?"
+      - "Has my claim been processed?"
+      - "Update me on claim number 12345"
+
+  - name: update_policy
+    description: Update details on an existing insurance policy
+    sample_utterances:
+      - "Update my policy"
+      - "Change my coverage"
+      - "Add a driver to my policy"
+
+  - name: get_policy_details
+    description: Retrieve details of an existing policy
+    sample_utterances:
+      - "Show me my policy details"
+      - "What does my insurance cover?"
+      - "Get my policy information"
+
+  - name: add_vehicle
+    description: Add a vehicle to an existing auto insurance policy
+    sample_utterances:
+      - "Add a car to my policy"
+      - "I bought a new vehicle"
+      - "Include my truck in my insurance"
+
+  - name: remove_vehicle
+    description: Remove a vehicle from an existing auto insurance policy
+    sample_utterances:
+      - "Remove a car from my policy"
+      - "I sold my old car"
+      - "Take the motorcycle off my policy"
+
+  - name: request_quote
+    description: Request an insurance quote
+    sample_utterances:
+      - "Get me an insurance quote"
+      - "How much would coverage cost?"
+      - "Request a quote for home insurance"
+
+  - name: renew_policy
+    description: Renew an expiring insurance policy
+    sample_utterances:
+      - "Renew my policy"
+      - "My policy is expiring, what do I do?"
+      - "Continue my coverage"
+
+  - name: cancel_policy
+    description: Cancel an existing insurance policy
+    sample_utterances:
+      - "Cancel my insurance"
+      - "I want to cancel my policy"
+      - "Stop my coverage"
+
+  - name: roadside_assistance
+    description: Request roadside assistance
+    sample_utterances:
+      - "I need roadside assistance"
+      - "My car broke down"
+      - "Send a tow truck"

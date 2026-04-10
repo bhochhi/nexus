@@ -1,0 +1,70 @@
+intents:
+  - name: check_balance
+    description: Check the current account balance
+    sample_utterances:
+      - "What is my balance?"
+      - "How much money do I have?"
+      - "Show me my account balance"
+
+  - name: transfer_money
+    description: Transfer funds between accounts
+    sample_utterances:
+      - "Transfer $200 to my savings account"
+      - "Send money to John"
+      - "Move funds between accounts"
+
+  - name: view_transactions
+    description: View recent transaction history
+    sample_utterances:
+      - "Show my recent transactions"
+      - "What charges do I have?"
+      - "List my last 10 transactions"
+
+  - name: report_fraud
+    description: Report a fraudulent transaction or suspicious activity
+    sample_utterances:
+      - "I see a charge I don't recognize"
+      - "Report fraud on my account"
+      - "There's an unauthorized transaction"
+
+  - name: freeze_card
+    description: Temporarily freeze a debit or credit card
+    sample_utterances:
+      - "Freeze my card"
+      - "Lock my debit card"
+      - "I lost my card, freeze it"
+
+  - name: activate_card
+    description: Activate a new or replacement card
+    sample_utterances:
+      - "Activate my new card"
+      - "I received a replacement card"
+      - "How do I activate my card?"
+
+  - name: update_contact_info
+    description: Update phone number, email, or address on file
+    sample_utterances:
+      - "Update my phone number"
+      - "Change my email address"
+      - "I moved, update my address"
+
+  - name: open_account
+    description: Open a new bank account
+    sample_utterances:
+      - "I want to open a savings account"
+      - "How do I open a new account?"
+      - "Apply for a checking account"
+
+  - name: close_account
+    description: Close an existing bank account
+    sample_utterances:
+      - "I want to close my account"
+      - "How do I close my savings account?"
+      - "Please close my checking account"
+
+  - name: dispute_transaction
+    description: Dispute a specific transaction on an account
+    sample_utterances:
+      - "I want to dispute a charge"
+      - "This transaction is wrong"
+      - "Help me dispute a payment"
