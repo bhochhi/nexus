@@ -365,6 +365,16 @@ class OpenAILLMClient(LLMClient):
                             "parameters": schema
                         }
                     })
+                elif "name" in t and "inputSchema" in t: # Bare bedrock format
+                    schema = t.get("inputSchema", {}).get("json", {})
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": t.get("name"),
+                            "description": t.get("description"),
+                            "parameters": schema
+                        }
+                    })
                 else:
                     openai_tools.append(t)
             elif hasattr(t, "name") and hasattr(t, "description"):

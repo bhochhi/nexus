@@ -2,13 +2,17 @@
 Nexus — Global configuration.
 """
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 class Config:
     """Application configuration with sensible defaults."""
 
     # LLM
-    LLM_PROVIDER: str = os.getenv("NEXUS_LLM_PROVIDER", "bedrock")  # 'bedrock' or 'openai'
+    LLM_PROVIDER: str = os.getenv("NEXUS_LLM_PROVIDER", "openai")  # 'openai' or 'bedrock'
     LLM_MODEL_ID: str = os.getenv("NEXUS_LLM_MODEL", "amazon.nova-pro-v1:0")
     LLM_REGION: str = os.getenv("NEXUS_LLM_REGION", "us-east-1")
     

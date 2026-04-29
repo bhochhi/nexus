@@ -62,14 +62,17 @@ class MainAgent(BaseAgent):
         return self._tools_list
 
     def invoke(self, user_input: str) -> AgentResult:
-        """Process user input through the orchestrator graph.
+        """Process user input through the orchestrator graph."""
+        # Route to active sub-agent if delegation is in progress
+        if self.session.current_agent != self.agent_name:
+            try:
+                target_agent = self._create_agent(self.session.current_agent)
+                return target_agent.invoke(user_input)
+            except Exception as e:
+                logger.error(f"Routing to {self.session.current_agent} failed: {e}")
+                self.session.current_agent = self.agent_name
+                # Fall through to let main_agent handle it if recovery is needed
 
-        1. Add user message to session history
-        2. Build system prompt with context
-        3. Run the LangGraph
-        4. Add assistant response to session history
-        5. Return AgentResult
-        """
         # Add user message to this agent's history
         user_msg = Message(role="user", content=user_input, agent=self.agent_name)
         self.session.add_message(self.agent_name, user_msg)
@@ -238,8 +241,7 @@ class MainAgent(BaseAgent):
             target_agent = self._create_agent(agent_name)
             result = target_agent.invoke(user_input)
 
-            # Restore current_agent back to main_agent
-            self.session.current_agent = self.agent_name
+            # Sub-agent takes control. It will set current_agent back to main_agent when done.
 
             return {
                 "delegation_result": result.response,

@@ -32,18 +32,17 @@ def setup_logging(level: str = "INFO"):
 
 
 def print_debug_panel(result: AgentResult):
-    """Display the debug transparency panel (F-007)."""
-    W = 55  # panel inner width
+    """Display the debug transparency panel without character limits."""
     print()
-    print("┌─ Debug " + "─" * (W - 8) + "┐")
+    print("\033[93m--- Debug ---\033[0m")
 
     # Agent line (show delegation if it occurred)
     agent_display = result.active_agent
     if result.delegation_occurred:
         tc = result.state_snapshot.get("tool_call", {})
         target = tc.get("arguments", {}).get("agent_name", "?")
-        agent_display = f"{result.active_agent} → {target} (delegated)"
-    print(f"│ Agent:     {agent_display:<{W - 13}}│")
+        agent_display = f"{result.active_agent} -> {target} (delegated)"
+    print(f"\033[93mAgent:     {agent_display}\033[0m")
 
     # Tool call (if any)
     tc = result.state_snapshot.get("tool_call")
@@ -52,28 +51,19 @@ def print_debug_panel(result: AgentResult):
         args = tc.get("arguments", {})
         arg_parts = [f'{k}="{v}"' for k, v in args.items()]
         call_str += ", ".join(arg_parts) + ")"
-        if len(call_str) > W - 13:
-            call_str = call_str[: W - 16] + "..."
-        print(f"│ Tool:      {call_str:<{W - 13}}│")
+        print(f"\033[93mTool:      {call_str}\033[0m")
     else:
-        print(f"│ Tool:      {'(direct response)':<{W - 13}}│")
+        print(f"\033[93mTool:      (direct response)\033[0m")
 
     # Reasoning
     if result.llm_reasoning:
-        reason_lines = result.llm_reasoning[:120].split("\n")
-        for i, line in enumerate(reason_lines[:3]):
-            label = "Reasoning:" if i == 0 else "          "
-            text = line[: W - 14]
-            print(f"│ {label} {text:<{W - 14}}│")
+        print(f"\033[93mReasoning: {result.llm_reasoning}\033[0m")
     else:
-        print(f"│ Reasoning: {'(none)':<{W - 14}}│")
+        print(f"\033[93mReasoning: (none)\033[0m")
 
     # State snapshot
-    state_str = str(result.state_snapshot)
-    if len(state_str) > W - 13:
-        state_str = state_str[: W - 16] + "..."
-    print(f"│ State:     {state_str:<{W - 13}}│")
-    print("└" + "─" * W + "┘")
+    print(f"\033[93mState:     {result.state_snapshot}\033[0m")
+    print("\033[93m-------------\033[0m")
     print()
 
 
@@ -110,7 +100,8 @@ def main():
     # Initial greeting for new session
     if session.is_new_session:
         result = main_agent.invoke("hello")
-        print(f"\nNexus: {result.response}")
+        agent_name = result.active_agent
+        print(f"\n\033[94m[{agent_name}]\033[0m: {result.response}")
         if args.debug:
             print_debug_panel(result)
 
@@ -118,7 +109,7 @@ def main():
     print("(Type 'quit' or 'exit' to end)\n")
     while True:
         try:
-            user_input = input("You: ").strip()
+            user_input = input(f"\033[92mYou:\033[0m ").strip()
         except (KeyboardInterrupt, EOFError):
             print("\n\nGoodbye! 👋")
             break
@@ -126,11 +117,12 @@ def main():
         if not user_input:
             continue
         if user_input.lower() in ("quit", "exit", "bye"):
-            print("\nNexus: Goodbye! Feel free to reach out anytime. 👋")
+            print("\n\033[93m[System]\033[0m: Goodbye! Feel free to reach out anytime. 👋")
             break
 
         result = main_agent.invoke(user_input)
-        print(f"\nNexus: {result.response}")
+        agent_name = result.active_agent
+        print(f"\n\033[94m[{agent_name}]\033[0m: {result.response}")
 
         if args.debug:
             print_debug_panel(result)
