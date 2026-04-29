@@ -13,14 +13,14 @@ async def read_from_ws(ws):
             data = json.loads(message)
             msg_type = data.get("type")
             if msg_type == "system":
-                print(f"\n[SYSTEM] {data['content']}\nYou: ", end="", flush=True)
+                print(f"\n\033[93m[System]\033[0m: {data['content']}\n\033[92mYou:\033[0m ", end="", flush=True)
             elif msg_type == "chat":
-                print(f"\n[Member] {data['content']}\nYou: ", end="", flush=True)
+                print(f"\n\033[94m[Member]\033[0m: {data['content']}\n\033[92mYou:\033[0m ", end="", flush=True)
             elif msg_type == "disconnect":
-                print("\n[SYSTEM] Chat ended by member. Exiting.")
+                print("\n\033[93m[System]\033[0m: Chat ended by member. Exiting.")
                 sys.exit(0)
     except websockets.exceptions.ConnectionClosed:
-        print("\n[SYSTEM] Connection to server lost.")
+        print("\n\033[93m[System]\033[0m: Connection to server lost.")
         sys.exit(1)
 
 async def read_from_stdin(ws):
@@ -39,16 +39,17 @@ async def read_from_stdin(ws):
             "type": "chat",
             "content": line
         }))
-        print("You: ", end="", flush=True)
+        print("\033[92mYou:\033[0m ", end="", flush=True)
 
 async def main():
     parser = argparse.ArgumentParser(description="MSR Console")
-    parser.add_argument("--queue", required=True, choices=["banking", "insurance", "advice"])
-    parser.add_argument("--name", required=True, help="Agent Name")
+    parser.add_argument("--queue", required=True, help="Queue to connect to (banking, insurance, advice)")
+    parser.add_argument("--name", required=True, help="MSR name")
     args = parser.parse_args()
 
     uri = "ws://localhost:8765"
     try:
+        print(f"\033[93m[System]\033[0m: Connecting to {uri}...")
         async with websockets.connect(uri) as ws:
             # Register
             await ws.send(json.dumps({
