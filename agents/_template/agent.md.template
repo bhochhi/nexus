@@ -1,0 +1,14 @@
+---
+name: {{agent_name}}
+display_name: "{{display_name}}"
+description: "{{description}}"
+skills:
+  - name: placeholder_skill
+    description: "TODO: Define this agent's primary skill"
+version: "{{version}}"
+status: active
+---
+
+# {{display_name}}
+
+{{description}}

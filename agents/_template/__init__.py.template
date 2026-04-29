@@ -1,0 +1,2 @@
+"""{{display_name}} agent module."""
+from .agent import {{class_name}}

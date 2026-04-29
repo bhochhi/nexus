@@ -1,0 +1,30 @@
+"""
+{{display_name}} — LangGraph StateGraph definition.
+
+Implements: blueprints/{{agent_name}}/graph.spec.md
+"""
+from langgraph.graph import END, START, StateGraph
+
+from .state import {{class_name}}State
+
+
+def build_graph():
+    """Build the {{display_name}} state graph.
+
+    Graph: START → process → END
+    """
+    graph = StateGraph({{class_name}}State)
+
+    graph.add_node("process", process_node)
+    graph.add_edge(START, "process")
+    graph.add_edge("process", END)
+
+    return graph.compile()
+
+
+def process_node(state: {{class_name}}State) -> dict:
+    """Process member input.
+
+    TODO: Implement agent-specific logic.
+    """
+    return {"response": "", "reasoning": ""}

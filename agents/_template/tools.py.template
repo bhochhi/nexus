@@ -1,0 +1,24 @@
+"""
+{{display_name}} — Tool definitions.
+
+Tools are @tool-decorated functions whose schemas are auto-generated
+from type hints and docstrings.
+
+Implements: blueprints/{{agent_name}}/tools.spec.md
+"""
+
+# TODO: Add @tool-decorated functions for this agent.
+# Example:
+#
+# from langchain_core.tools import tool
+#
+# @tool
+# def example_tool(param: str) -> str:
+#     """Description of what this tool does.
+#
+#     Args:
+#         param: Description of the parameter.
+#     """
+#     return "result"
+
+TOOLS: list = []
