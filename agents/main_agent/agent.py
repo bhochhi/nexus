@@ -139,7 +139,7 @@ class MainAgent(BaseAgent):
 
         return AgentResult(
             response=response_text,
-            active_agent=self.agent_name,
+            active_agent=self.session.current_agent,
             llm_reasoning=reasoning,
             state_snapshot=state_snapshot,
             delegation_occurred=delegation_occurred,
