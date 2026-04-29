@@ -39,6 +39,17 @@ make run MEMBER_ID=M99999
 make msr-cli MSR_QUEUE=insurance MSR_NAME="Bob"
 ```
 
+### Environment Setup
+
+Before running the application, you must configure your environment variables. 
+Copy the `.env` template or create a `.env` file in the project root:
+
+```bash
+NEXUS_LLM_PROVIDER=openai
+NEXUS_OPENAI_MODEL=gpt-4o
+OPENAI_API_KEY=sk-...
+```
+
 ### Manual Setup
 
 ```bash

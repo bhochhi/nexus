@@ -16,7 +16,7 @@ As a **member**, I want to chat in real-time with a human representative, so tha
 - [ ] The bridge remains active until one of the termination conditions is met
 - [ ] **Termination: Member idle > 2 minutes** → auto-disconnect, notify MSR, return to orchestrator
 - [ ] **Termination: MSR signals end** (e.g., `/end` command) → disconnect, return to orchestrator
-- [ ] **Termination: Member requests different help** → disconnect, return to orchestrator for re-routing
+- [ ] **Termination: Member requests different help** → member must disconnect first, then return to orchestrator for re-routing
 - [ ] On any termination, a summary of the live session is generated
 - [ ] After termination, control returns to the orchestrator: "Your live session has ended. Is there anything else I can help with?"
 - [ ] The contact center WebSocket server runs as a separate process
@@ -38,11 +38,11 @@ As a **member**, I want to chat in real-time with a human representative, so tha
 3. System auto-disconnects, notifies MSR: "Member has disconnected (idle timeout)"
 4. Control returns to orchestrator
 
-### Queue Switch
+### Disconnecting
 1. Member is chatting with Insurance MSR
-2. Member: "Actually, I need help with a banking issue"
-3. LiveAgent detects queue mismatch → ends current session
-4. Returns to orchestrator with summary → orchestrator re-routes
+2. Member types 'disconnect' or MSR types '/end'
+3. LiveAgent detects disconnect command → ends current session
+4. Returns to orchestrator → orchestrator resumes conversation
 
 ## Dependencies
 - F-005: Live Agent Connection & Queue Routing

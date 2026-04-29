@@ -123,6 +123,7 @@ Member says: "I want to open a new savings account"
 nexus/
 ├── app.py                          # Application entry point
 ├── config.py                       # Global config (Bedrock, session, etc.)
+├── .env                            # Environment variables (LLM Provider, API keys)
 ├── requirements.txt
 ├── pyproject.toml
 ├── README.md
@@ -722,8 +723,8 @@ The WebSocket connection between LiveAgent and an MSR follows these rules:
 | Member idle > 2 minutes | Auto-disconnect, notify MSR |
 | Member leaves (no input > 2 min) | Auto-disconnect, notify MSR |
 | MSR signals end | Disconnect, return to main_agent |
-| Member wants different queue | Disconnect current, return to main_agent for re-routing |
-| Member wants different help entirely | Disconnect, return to main_agent with summary |
+| Member wants different queue | Member must type 'disconnect' first to end bridge, then ask for re-routing |
+| Member wants different help entirely | Member must type 'disconnect' first to end bridge, then ask for re-routing |
 
 When the LiveAgent session ends for any reason, control returns to the main_agent with a delegation summary.
 
