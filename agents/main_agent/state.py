@@ -5,6 +5,8 @@ Implements: blueprints/main_agent/graph.spec.md
 """
 from typing import Any, Dict, List, Optional
 
+from core.types import Message
+
 from typing_extensions import TypedDict
 
 
@@ -12,7 +14,7 @@ class MainAgentState(TypedDict, total=False):
     """State schema for the Main Agent graph."""
 
     user_input: str                     # Current member message
-    messages: List[Dict[str, Any]]      # Bedrock-format conversation messages
+    messages: List[Message]             # Provider-agnostic conversation messages
     system_prompt: str                  # Assembled system prompt
     tools: List                         # Available @tool objects
     response: str                       # Final response text

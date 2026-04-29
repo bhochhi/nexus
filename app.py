@@ -17,7 +17,7 @@ import sys
 from agents.main_agent.agent import MainAgent
 from config import Config
 from core.discovery import discover_agents
-from core.llm import LLMClient
+from core.llm import get_llm_client
 from core.session import SessionManager
 from core.types import AgentResult
 
@@ -92,7 +92,7 @@ def main():
     print("=" * 50)
 
     try:
-        llm_client = LLMClient(model_id=Config.LLM_MODEL_ID, region=Config.LLM_REGION)
+        llm_client = get_llm_client(Config)
     except RuntimeError as e:
         print(f"\n❌ {e}")
         sys.exit(1)

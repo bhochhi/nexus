@@ -8,8 +8,13 @@ class Config:
     """Application configuration with sensible defaults."""
 
     # LLM
+    LLM_PROVIDER: str = os.getenv("NEXUS_LLM_PROVIDER", "bedrock")  # 'bedrock' or 'openai'
     LLM_MODEL_ID: str = os.getenv("NEXUS_LLM_MODEL", "amazon.nova-pro-v1:0")
     LLM_REGION: str = os.getenv("NEXUS_LLM_REGION", "us-east-1")
+    
+    # OpenAI Config
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+    OPENAI_MODEL_ID: str = os.getenv("NEXUS_OPENAI_MODEL", "gpt-4o")
 
     # Session
     DEFAULT_MEMBER_ID: str = "member_default"

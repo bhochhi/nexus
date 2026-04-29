@@ -91,14 +91,13 @@ class MainAgent(BaseAgent):
         context_parts.append(f"Available capabilities:\n{self._capabilities_text}")
         system_prompt = self.get_system_prompt("\n\n".join(context_parts))
 
-        # Convert session messages to Bedrock format
+        # Provide standard session messages instead of converting to bedrock
         session_messages = self._get_conversation_messages()
-        bedrock_messages = self.llm._convert_messages(session_messages)
 
         # Build initial graph state
         initial_state: MainAgentState = {
             "user_input": user_input,
-            "messages": bedrock_messages,
+            "messages": session_messages,
             "system_prompt": system_prompt,
             "tools": self._tools_list,
             "response": "",
@@ -159,7 +158,7 @@ class MainAgent(BaseAgent):
         max_iterations = 5  # Prevent infinite tool loops
         for _ in range(max_iterations):
             # Call LLM with tools
-            response = self.llm.invoke_with_tools_raw(messages, system_prompt, tools)
+            response = self.llm.invoke_with_tools(messages, system_prompt, tools)
 
             if response.tool_call:
                 if response.tool_call.name == "delegate_to_agent":
@@ -181,18 +180,16 @@ class MainAgent(BaseAgent):
                         tool_result = f"Unknown tool: {response.tool_call.name}"
 
                     # Add assistant tool_use + user tool_result to messages
-                    assistant_msg = response.raw_response.get("output", {}).get("message", {})
-                    if assistant_msg:
-                        messages.append(assistant_msg)
-                    messages.append({
-                        "role": "user",
-                        "content": [{
-                            "toolResult": {
-                                "toolUseId": response.tool_call.tool_use_id,
-                                "content": [{"text": str(tool_result)}],
-                            }
-                        }],
-                    })
+                    messages.append(Message(
+                        role="assistant",
+                        content=response.text,
+                        metadata={"tool_calls": [response.tool_call]}
+                    ))
+                    messages.append(Message(
+                        role="tool",
+                        content=str(tool_result),
+                        metadata={"tool_use_id": response.tool_call.tool_use_id}
+                    ))
                     continue  # Loop back to LLM with tool result
             else:
                 # Direct text response (greeting, decline, etc.)
