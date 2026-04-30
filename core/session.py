@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from core.types import Message
+from core.types import Message, AgentResult
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +25,7 @@ class AgentState:
     conversation_history: List[Message] = field(default_factory=list)
     delegation_summary: Optional[str] = None
     data: Dict[str, Any] = field(default_factory=dict)
+    results: List[AgentResult] = field(default_factory=list)
 
 
 @dataclass

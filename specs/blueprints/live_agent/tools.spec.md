@@ -11,7 +11,7 @@ Defines the tools available to the `LiveAgent` LLM for queue routing and real-ti
 
 ### `connect_to_queue`
 - Input: `queue_name` (string: banking, insurance, advice)
-- Output: `result_text` (string: summary of the session termination)
+- Output: `dict` containing `success` (boolean), `message` (string: summary or fallback message), and optionally `error_details` (string).
 - Behavior:
   - Connects to `ws://localhost:8765`.
   - Sends a registration message: `{"type": "register", "role": "member", "queue": queue_name, "member_id": self.session.member_id}`.
@@ -19,7 +19,8 @@ Defines the tools available to the `LiveAgent` LLM for queue routing and real-ti
   - Enters a synchronous loop utilizing `select.select` on `sys.stdin` to read member inputs non-blockingly.
   - Enforces a 120-second idle timeout.
   - Terminates gracefully if the member types `disconnect` or `/end`.
-  - Disconnects the socket and returns a summary message.
+  - If the connection fails, logs the raw error to the console in red and returns an error dictionary.
+  - Disconnects the socket and returns a summary message on success.
 
 ## Data Models
 ```python

@@ -61,6 +61,11 @@ def print_debug_panel(result: AgentResult):
     else:
         print(f"\033[93mReasoning: (none)\033[0m")
 
+    # Status
+    print(f"\033[93mStatus:    {result.status}\033[0m")
+    if result.status == "error" and result.error_details:
+        print(f"\033[91mError:     {result.error_details}\033[0m")
+
     # State snapshot
     print(f"\033[93mState:     {result.state_snapshot}\033[0m")
     print("\033[93m-------------\033[0m")
@@ -101,6 +106,7 @@ def main():
     if session.is_new_session:
         result = main_agent.invoke("hello")
         agent_name = result.active_agent
+        session.get_agent_state(agent_name).results.append(result)
         print(f"\n\033[94m[{agent_name}]\033[0m: {result.response}")
         if args.debug:
             print_debug_panel(result)
@@ -122,6 +128,7 @@ def main():
 
         result = main_agent.invoke(user_input)
         agent_name = result.active_agent
+        session.get_agent_state(agent_name).results.append(result)
         print(f"\n\033[94m[{agent_name}]\033[0m: {result.response}")
 
         if args.debug:

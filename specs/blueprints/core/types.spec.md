@@ -100,6 +100,8 @@ class AgentResult:
     llm_reasoning: str          # LLM's reasoning for the debug panel
     state_snapshot: Dict[str, Any]  # Current state for the debug panel
     delegation_occurred: bool   # Whether delegation happened this turn
+    status: str                 # "success" | "error" | "needs_input" | "in_progress"
+    error_details: Optional[str] # Raw error string if status == "error"
 ```
 
 ## Acceptance Criteria
@@ -109,6 +111,7 @@ class AgentResult:
 - [ ] `Message.role` only accepts: "user", "assistant", "system", "tool"
 - [ ] `AgentCapability.status` only accepts: "active", "beta", "disabled"
 - [ ] `DelegationResponse.status` only accepts: "complete", "in_progress", "needs_input", "error"
+- [ ] `AgentResult.status` only accepts: "success", "error", "needs_input", "in_progress"
 - [ ] All timestamp fields use `datetime` from stdlib
 - [ ] All Dict fields default to empty dict via `field(default_factory=dict)`
 - [ ] All Optional fields default to `None`

@@ -87,3 +87,6 @@ class AgentResult:
     llm_reasoning: str = ""
     state_snapshot: Dict[str, Any] = field(default_factory=dict)
     delegation_occurred: bool = False
+    status: str = "success"
+    error_details: Optional[str] = None
+

@@ -43,6 +43,7 @@ class AgentState:
     conversation_history: List[Message]  # This agent's own conversation turns
     delegation_summary: Optional[str]    # Summary received when delegated to
     data: Dict[str, Any]                 # Agent-specific working data
+    results: List[AgentResult]           # Complete history of AgentResult objects
 ```
 
 ### `SessionState`

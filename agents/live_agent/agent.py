@@ -67,10 +67,16 @@ class LiveAgent(BaseAgent):
         response = self.llm.invoke_with_tools(messages, system_prompt, self.tools)
         
         result_text = response.text
+        status = "success"
+        error_details = None
         
         if response.tool_call and response.tool_call.name == "connect_to_queue":
             q_name = response.tool_call.arguments.get("queue_name", "banking")
-            result_text = self._connect_to_queue(q_name)
+            conn_res = self._connect_to_queue(q_name)
+            result_text = conn_res.get("message", "")
+            if not conn_res.get("success"):
+                status = "error"
+                error_details = conn_res.get("error_details")
             
             # Chat is done, hand control back to orchestrator
             self.session.current_agent = "main_agent"
@@ -88,10 +94,12 @@ class LiveAgent(BaseAgent):
             active_agent=self.agent_name,
             llm_reasoning=response.reasoning,
             state_snapshot={"current_agent": self.session.current_agent},
-            delegation_occurred=False
+            delegation_occurred=False,
+            status=status,
+            error_details=error_details
         )
 
-    def _connect_to_queue(self, queue_name: str) -> str:
+    def _connect_to_queue(self, queue_name: str) -> dict:
         """Connect the user to a live agent queue via WebSocket."""
         uri = "ws://localhost:8765"
         print(f"\n\033[93m[System]\033[0m: Connecting you to the {queue_name} queue. Please wait...")
@@ -165,6 +173,14 @@ class LiveAgent(BaseAgent):
                             break
                             
         except Exception as e:
-            return f"Failed to connect to the live agent system: {e}"
+            logger.error(f"\033[91mFailed to connect to websocket: {e}\033[0m")
+            return {
+                "success": False,
+                "message": "I'm having trouble connecting to our team right now. Would you like me to try again, or is there something else I can help with?",
+                "error_details": str(e)
+            }
             
-        return "Live chat has ended. I am back to assist you. Is there anything else I can help you with?"
+        return {
+            "success": True,
+            "message": "Live chat has ended. I am back to assist you. Is there anything else I can help you with?"
+        }

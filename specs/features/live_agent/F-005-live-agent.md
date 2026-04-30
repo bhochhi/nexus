@@ -16,6 +16,7 @@ As a **member**, I want to explain what I need help with and be automatically ro
 - [ ] Once the queue is identified, LiveAgent connects to the contact center via WebSocket
 - [ ] Member is informed of the connection status: "Connecting you to our Banking team..."
 - [ ] If the WebSocket connection fails, member is informed and offered to retry or go back
+- [ ] On connection failure, the sub-agent MUST log the raw error using error color code and set its `AgentResult` status to `error`.
 - [ ] If no MSR is available in the queue, member is informed they are waiting
 
 ## Scenarios
@@ -34,7 +35,11 @@ As a **member**, I want to explain what I need help with and be automatically ro
 
 ### Connection Failure
 1. LiveAgent attempts WebSocket connection → fails
-2. "I'm having trouble connecting to our team right now. Would you like me to try again, or is there something else I can help with?"
+2. Sub-agent logs raw error locally with error color code, sets `AgentResult.status = "error"`, and yields back to orchestrator.
+3. Sub-agent returns: "I'm having trouble connecting to our team right now. Would you like me to try again, or is there something else I can help with?"
+
+## Out of Scope
+- Automatic retry mechanism for WebSocket connection. For v1, an immediate failure with a friendly message is acceptable.
 
 ## Dependencies
 - F-001: Member Greeting & Session Management

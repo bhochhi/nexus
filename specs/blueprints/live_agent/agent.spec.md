@@ -18,6 +18,7 @@ Defines the `LiveAgent` orchestrator component which bridges the virtual AI sess
   3. If LLM decides to connect, invokes `connect_to_queue` tool.
   4. Manages terminal stream during the connection.
   5. Upon exiting the live bridge, updates `session.current_agent` to return control to the main orchestrator.
+  6. Gracefully catches WebSocket connection failures, logs the exception in red locally, returns a user-friendly fallback message, and sets the `AgentResult` status to `error`.
 
 ## Data Models
 No specific new data models. Uses `Message` and `AgentResult` from `core.types`.
