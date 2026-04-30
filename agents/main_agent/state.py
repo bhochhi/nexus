@@ -21,4 +21,5 @@ class MainAgentState(TypedDict, total=False):
     reasoning: str                      # LLM reasoning for debug panel
     tool_call: Optional[Dict[str, Any]] # Pending tool call
     delegation_result: Optional[str]    # Response from delegated sub-agent
+    delegated_to: Optional[str]         # The target agent that handled the turn
     delegation_occurred: bool           # Whether delegation happened

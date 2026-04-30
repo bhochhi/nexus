@@ -42,7 +42,8 @@ class AutoInsuranceAgent(BaseAgent):
         user_msg = Message(role="user", content=user_input, agent=self.agent_name)
         self.session.add_message(self.agent_name, user_msg)
         
-        system_prompt = self.get_system_prompt()
+        context = f"The current member ID is: {self.session.member_id}"
+        system_prompt = self.get_system_prompt(context)
         messages = self._get_conversation_messages()
         
         # Initial LLM call

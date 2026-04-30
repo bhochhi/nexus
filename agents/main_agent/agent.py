@@ -92,6 +92,17 @@ class MainAgent(BaseAgent):
             context_parts.append(delegation)
 
         context_parts.append(f"Available capabilities:\n{self._capabilities_text}")
+
+        import os
+        is_restricted = os.environ.get("RESTRICTED_MAIN_AGENT", "true").lower() == "true"
+        if is_restricted:
+            context_parts.append(
+                "CRITICAL RESTRICTION: You are STRICTLY LIMITED to greetings and delegating to sub-agents.\n"
+                "You MUST NOT answer general knowledge or domain-specific questions (like FAQ questions).\n"
+                "If a member's request matches ANY discovered capability, you MUST immediately use the `delegate_to_agent` tool.\n"
+                "If a request falls outside all capabilities, acknowledge the request, state that you are still learning, and offer to connect them with a live agent."
+            )
+
         system_prompt = self.get_system_prompt("\n\n".join(context_parts))
 
         # Provide standard session messages instead of converting to bedrock
@@ -107,6 +118,7 @@ class MainAgent(BaseAgent):
             "reasoning": "",
             "tool_call": None,
             "delegation_result": None,
+            "delegated_to": None,
             "delegation_occurred": False,
         }
 
@@ -117,6 +129,7 @@ class MainAgent(BaseAgent):
         response_text = final_state.get("response", "")
         reasoning = final_state.get("reasoning", "")
         delegation_occurred = final_state.get("delegation_occurred", False)
+        delegated_to = final_state.get("delegated_to")
 
         # Add assistant response to session history
         assistant_msg = Message(
@@ -136,10 +149,12 @@ class MainAgent(BaseAgent):
         }
         if tool_call:
             state_snapshot["tool_call"] = tool_call
+            
+        display_agent = delegated_to if delegated_to else self.session.current_agent
 
         return AgentResult(
             response=response_text,
-            active_agent=self.session.current_agent,
+            active_agent=display_agent,
             llm_reasoning=reasoning,
             state_snapshot=state_snapshot,
             delegation_occurred=delegation_occurred,
@@ -246,6 +261,7 @@ class MainAgent(BaseAgent):
             return {
                 "delegation_result": result.response,
                 "delegation_occurred": True,
+                "delegated_to": agent_name,
                 "reasoning": f"Delegated to {agent_name}: {reason}. Sub-agent response received.",
             }
         except Exception as e:
@@ -311,4 +327,11 @@ class MainAgent(BaseAgent):
             registry["live_agent"] = lambda: LiveAgent(self.llm, self.session)
         except ImportError:
             logger.warning("live_agent module not available for delegation")
+            
+        try:
+            from agents.auto_insurance_agent.agent import AutoInsuranceAgent
+            registry["auto_insurance_agent"] = lambda: AutoInsuranceAgent(self.llm, self.session)
+        except ImportError:
+            logger.warning("auto_insurance_agent module not available for delegation")
+            
         return registry

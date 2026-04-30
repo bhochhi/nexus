@@ -4,7 +4,7 @@ Implements: blueprints/auto_insurance_agent/tools.spec.md
 """
 
 MOCK_POLICIES = {
-    "MEMBER-123": [
+    "M12345": [
         {
             "policy_id": "AUTO-999888",
             "start_date": "2026-01-15",

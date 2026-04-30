@@ -126,6 +126,10 @@ def main():
 
         if args.debug:
             print_debug_panel(result)
+            
+        # If control was handed back to the orchestrator this turn, announce it
+        if result.delegation_occurred and session.current_agent == "main_agent" and agent_name != "main_agent":
+            print(f"\n\033[94m[main_agent]\033[0m: Welcome back! What else can I help you with today?")
 
         # Update session
         session_mgr.update(session)
