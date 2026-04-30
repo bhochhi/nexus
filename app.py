@@ -20,6 +20,7 @@ from core.discovery import discover_agents
 from core.llm import get_llm_client
 from core.session import SessionManager
 from core.types import AgentResult
+from services.agent_discovery import AgentDiscoveryService
 
 
 def setup_logging(level: str = "INFO"):
@@ -41,7 +42,7 @@ def print_debug_panel(result: AgentResult):
     if result.delegation_occurred:
         tc = result.state_snapshot.get("tool_call", {})
         target = tc.get("arguments", {}).get("agent_name", "?")
-        agent_display = f"{result.active_agent} -> {target} (delegated)"
+        agent_display = f"main_agent -> {target} (delegated)"
     print(f"\033[93mAgent:     {agent_display}\033[0m")
 
     # Tool call (if any)
@@ -99,8 +100,12 @@ def main():
     session = session_mgr.get_or_create(args.member_id)
     logger.info(f"Session: {session.session_id} (member: {args.member_id})")
 
+    # Initialize agent discovery service
+    agent_discovery = AgentDiscoveryService()
+    agent_discovery.register_agents()
+
     # Create main agent
-    main_agent = MainAgent(llm_client, session, capabilities)
+    main_agent = MainAgent(llm_client, session, capabilities, agent_discovery)
 
     # Initial greeting for new session
     if session.is_new_session:

@@ -36,9 +36,11 @@ class MainAgent(BaseAgent):
         llm_client: LLMClient,
         session: SessionState,
         capabilities: List[AgentCapability],
+        agent_discovery_service,
     ):
         self.capabilities = capabilities
         self._capabilities_text = format_capabilities(capabilities)
+        self.agent_discovery_service = agent_discovery_service
 
         # Build tools from discovered capabilities
         self._tools_list, self._tools_map = build_tools(capabilities)
@@ -314,24 +316,4 @@ class MainAgent(BaseAgent):
 
     def _create_agent(self, agent_name: str):
         """Create a sub-agent instance by name."""
-        agent_registry = self._build_agent_registry()
-        if agent_name not in agent_registry:
-            raise ValueError(f"Unknown agent: {agent_name}")
-        return agent_registry[agent_name]()
-
-    def _build_agent_registry(self) -> dict:
-        """Build a lazy registry of available agents."""
-        registry = {}
-        try:
-            from agents.live_agent.agent import LiveAgent
-            registry["live_agent"] = lambda: LiveAgent(self.llm, self.session)
-        except ImportError:
-            logger.warning("live_agent module not available for delegation")
-            
-        try:
-            from agents.auto_insurance_agent.agent import AutoInsuranceAgent
-            registry["auto_insurance_agent"] = lambda: AutoInsuranceAgent(self.llm, self.session)
-        except ImportError:
-            logger.warning("auto_insurance_agent module not available for delegation")
-            
-        return registry
+        return self.agent_discovery_service.get_agent(agent_name, self.llm, self.session)
