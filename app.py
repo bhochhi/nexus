@@ -40,9 +40,10 @@ def print_debug_panel(result: AgentResult):
     # Agent line (show delegation if it occurred)
     agent_display = result.active_agent
     if result.delegation_occurred:
-        tc = result.state_snapshot.get("tool_call", {})
-        target = tc.get("arguments", {}).get("agent_name", "?")
-        agent_display = f"main_agent -> {target} (delegated)"
+        if result.status in ("complete", "error"):
+            agent_display = f"{result.active_agent} -> main_agent (yielded)"
+        else:
+            agent_display = f"main_agent -> {result.active_agent} (delegated)"
     print(f"\033[93mAgent:     {agent_display}\033[0m")
 
     # Tool call (if any)

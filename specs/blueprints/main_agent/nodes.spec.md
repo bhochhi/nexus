@@ -83,9 +83,10 @@ def delegate_node(state: MainAgentState) -> dict:
 5. Instantiate the target agent (via agent registry or dynamic import)
 6. Call `target_agent.invoke(user_input)` with the original member message
 7. Capture the sub-agent's `AgentResult`
-8. Set `delegation_summary` on main_agent's state with the return summary
-9. Update `session.current_agent` back to `main_agent`
-10. Return delegation result
+8. If `AgentResult.status` is "complete" or "error", actively reclaim the session (`session.current_agent = main_agent`).
+9. If `AgentResult.status` is "error", record the failure in `session.context["failed_delegations"]` with the current timestamp to prevent immediate re-delegation.
+10. Set `delegation_summary` on main_agent's state with the return summary
+11. Return delegation result
 
 **Agent Instantiation:**
 For v1, use a simple registry pattern:

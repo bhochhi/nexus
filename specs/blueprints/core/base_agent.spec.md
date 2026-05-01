@@ -48,9 +48,12 @@ Abstract base class that all agents extend. Provides the common structure: loadi
 - Main entry point for processing a member's message
 - Add user message to this agent's conversation history
 - Build system prompt (persona + instructions + delegation summary if present)
-- Execute the LangGraph with current state
-- Add assistant response to this agent's conversation history
-- Return AgentResult with response, reasoning, state snapshot
+- Enter an iterative tool-calling loop (max 5 turns):
+  - Execute LLM with current state and tools
+  - If LLM calls `yield_control`: extract `final_message`, set `current_agent="main_agent"`, mark `delegation_occurred=True`, and break the loop.
+  - If LLM calls other tools: execute the tool natively, append tool result to history, and continue the loop.
+  - If LLM responds with plain text: add assistant response to history and break the loop.
+- Return `AgentResult` with response, active_agent, reasoning, state snapshot, and delegation status.
 
 #### `_get_conversation_messages(self) -> List[Message]`
 - Retrieve this agent's conversation history from session

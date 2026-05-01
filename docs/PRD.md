@@ -17,6 +17,7 @@ Financial institutions need a conversational AI platform that can handle diverse
 - **Sub-Agents** are independent, self-describing modules that can be developed, tested, and eventually hosted independently
 - **Agent discovery** is spec-driven: each agent publishes an `agent.md` manifest that the orchestrator reads at startup
 - **Session state** is shared across agents with **isolated conversation histories** — each agent maintains its own history and receives a **summary** on delegation handoffs
+- **Handoff Protocol** is native and standardized: sub-agents yield control back to the orchestrator exclusively by calling the `yield_control` tool with a `final_message` parameter, rather than relying on brittle text markers.
 
 ---
 
@@ -28,6 +29,7 @@ Financial institutions need a conversational AI platform that can handle diverse
 | **Self-Describing** | Agents expose their capabilities via `agent.md` — the orchestrator never hardcodes sub-agent knowledge |
 | **Independent Modules** | Each agent is a standalone module with its own graph, state, tools, and LLM config |
 | **Isolated Histories** | Each agent owns its conversation history; delegation produces a summary handoff |
+| **Standardized Handoff** | Sub-agents return control strictly via the `yield_control(final_message)` tool |
 | **Graceful Degradation** | If a capability doesn't exist, the orchestrator acknowledges the ask and offers what it *can* do |
 | **LangGraph-Native** | Every agent is a LangGraph `StateGraph` with explicit nodes, edges, and state |
 | **Single LLM Provider** | AWS Bedrock with Amazon Nova Pro as the default model |
@@ -727,6 +729,23 @@ The WebSocket connection between LiveAgent and an MSR follows these rules:
 | Member wants different help entirely | Member must type 'disconnect' first to end bridge, then ask for re-routing |
 
 When the LiveAgent session ends for any reason, control returns to the main_agent with a delegation summary.
+
+### 10.5 Handoff Scenarios & Error Recovery
+
+Sub-agents must explicitly yield control back to the orchestrator exclusively by calling the `yield_control` tool. The yield tool requires a `status` which triggers specific behaviors:
+
+**Sub-Agent to Main Agent Handoff Triggers:**
+1. **Successful Fulfillment (`status="complete"`)**: The sub-agent has completed the request.
+2. **Unrecoverable Error / Max Loop (`status="error"`)**: The sub-agent encountered an error, failed to reach the required backend systems, or exceeded tool iteration limits. The error is returned to the orchestrator to display a member-friendly message.
+
+**Orchestrator Enforcement Contract:**
+While the sub-agent signals its intent to yield by returning an `AgentResult` with one of the above statuses, the orchestrator acts as the ultimate authority. The Main Agent inspects every `AgentResult` returned from a sub-agent. If the status is `complete` or `error`, the Main Agent explicitly reclaims the session by setting `session.current_agent = main_agent`. This guarantees control always safely returns to the orchestrator, preventing buggy sub-agents from hijacking the session loop.
+
+**Main Agent Smart Routing (Anti-Looping):**
+To prevent infinite delegation loops where the Main Agent repeatedly sends the member to an agent that immediately fails:
+- When a sub-agent yields control with an `error` status, the Main Agent records this failure in `session.context["failed_delegations"]` with a timestamp.
+- The Main Agent acts as a simple **Circuit Breaker** (full Circuit Breaker pattern is future scope). By default, it will not delegate to a blacklisted agent for 30 seconds (configurable via `AGENT_BLACKLIST_TIMEOUT_SECONDS` environment variable).
+- The system prompt for the Main Agent dynamically injects the list of currently blacklisted agents so the LLM knows to choose an alternative or offer graceful decline.
 
 ---
 

@@ -8,6 +8,8 @@ Features: F-001 (Greeting), F-003 (Routing), F-004 (Graceful Decline)
 Implements: blueprints/main_agent/graph.spec.md, tools.spec.md, nodes.spec.md
 """
 import logging
+import os
+import time
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional
 
@@ -68,8 +70,26 @@ class MainAgent(BaseAgent):
         # Route to active sub-agent if delegation is in progress
         if self.session.current_agent != self.agent_name:
             try:
-                target_agent = self._create_agent(self.session.current_agent)
-                return target_agent.invoke(user_input)
+                sub_agent_name = self.session.current_agent
+                target_agent = self._create_agent(sub_agent_name)
+                result = target_agent.invoke(user_input)
+                
+                # Enforce handoff: check if sub-agent yielded control
+                result_status = getattr(result, "status", "success")
+                if result_status in ("complete", "error"):
+                    logger.info(f"Sub-agent {sub_agent_name} yielded control with status {result_status}.")
+                    
+                    # Track failure for anti-looping
+                    if result_status == "error":
+                        logger.warning(f"Sub-agent {sub_agent_name} returned error status. Blacklisting.")
+                        if "failed_delegations" not in self.session.context:
+                            self.session.context["failed_delegations"] = {}
+                        self.session.context["failed_delegations"][sub_agent_name] = time.time()
+                    
+                    # Return control to orchestrator
+                    self.session.current_agent = self.agent_name
+                
+                return result
             except Exception as e:
                 logger.error(f"Routing to {self.session.current_agent} failed: {e}")
                 self.session.current_agent = self.agent_name
@@ -78,6 +98,9 @@ class MainAgent(BaseAgent):
         # Add user message to this agent's history
         user_msg = Message(role="user", content=user_input, agent=self.agent_name)
         self.session.add_message(self.agent_name, user_msg)
+
+        # Capture session state at start of turn for accurate debug snapshot
+        was_new_session = self.session.is_new_session
 
         # Build context
         context_parts = []
@@ -93,9 +116,28 @@ class MainAgent(BaseAgent):
         if delegation:
             context_parts.append(delegation)
 
+        # Handle blacklisted agents (Anti-Looping)
+        timeout_str = os.environ.get("AGENT_BLACKLIST_TIMEOUT_SECONDS", "30")
+        try:
+            timeout = int(timeout_str)
+        except ValueError:
+            timeout = 30
+            
+        failed_delegations = self.session.context.get("failed_delegations", {})
+        current_time = time.time()
+        blacklisted_agents = [
+            agent for agent, timestamp in failed_delegations.items()
+            if current_time - timestamp < timeout
+        ]
+        
+        if blacklisted_agents:
+            context_parts.append(
+                f"CRITICAL: The following agents recently failed and are TEMPORARILY BLACKLISTED: {', '.join(blacklisted_agents)}. "
+                "DO NOT delegate to these agents for the current request. Explain the issue to the member and offer an alternative."
+            )
+
         context_parts.append(f"Available capabilities:\n{self._capabilities_text}")
 
-        import os
         is_restricted = os.environ.get("RESTRICTED_MAIN_AGENT", "true").lower() == "true"
         if is_restricted:
             context_parts.append(
@@ -147,7 +189,7 @@ class MainAgent(BaseAgent):
         state_snapshot = {
             "current_agent": self.session.current_agent,
             "context": self.session.context,
-            "is_new_session": self.session.is_new_session,
+            "is_new_session": was_new_session,
         }
         if tool_call:
             state_snapshot["tool_call"] = tool_call
@@ -258,13 +300,26 @@ class MainAgent(BaseAgent):
             target_agent = self._create_agent(agent_name)
             result = target_agent.invoke(user_input)
 
-            # Sub-agent takes control. It will set current_agent back to main_agent when done.
+            # Enforce handoff: check if sub-agent immediately yielded control
+            result_status = getattr(result, "status", "success")
+            if result_status in ("complete", "error"):
+                logger.info(f"Sub-agent {agent_name} immediately yielded control with status {result_status}.")
+                
+                # Track failure for anti-looping
+                if result_status == "error":
+                    logger.warning(f"Sub-agent {agent_name} returned error status. Blacklisting temporarily.")
+                    if "failed_delegations" not in self.session.context:
+                        self.session.context["failed_delegations"] = {}
+                    self.session.context["failed_delegations"][agent_name] = time.time()
+                
+                # Return control to orchestrator immediately
+                self.session.current_agent = self.agent_name
 
             return {
                 "delegation_result": result.response,
                 "delegation_occurred": True,
                 "delegated_to": agent_name,
-                "reasoning": f"Delegated to {agent_name}: {reason}. Sub-agent response received.",
+                "reasoning": f"Delegated to {agent_name}: {reason}. Sub-agent response received. Status: {result_status}",
             }
         except Exception as e:
             logger.error(f"Delegation to {agent_name} failed: {e}")

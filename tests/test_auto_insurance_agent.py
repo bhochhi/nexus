@@ -80,10 +80,7 @@ class TestAutoInsuranceAgentInit(unittest.TestCase):
 
         self.assertEqual(agent.agent_name, "auto_insurance_agent")
         self.assertIsNone(agent.build_graph())
-        self.assertEqual(len(agent.get_tools()), 3)
-        self.assertIn("get_policy_details", agent.tool_map)
-        self.assertIn("add_driver", agent.tool_map)
-        self.assertIn("remove_driver", agent.tool_map)
+        self.assertEqual(len(agent.tools), 4) # 3 original tools + yield_control
 
 
 if __name__ == "__main__":

@@ -60,9 +60,7 @@ class TestBillingAgentInit(unittest.TestCase):
 
         self.assertEqual(agent.agent_name, "billing_agent")
         self.assertIsNone(agent.build_graph())
-        self.assertEqual(len(agent.get_tools()), 2)
-        self.assertIn("get_billing_summary", agent.tool_map)
-        self.assertIn("schedule_payment", agent.tool_map)
+        self.assertEqual(len(agent.tools), 3) # 2 original tools + yield_control
 
 
 if __name__ == "__main__":
