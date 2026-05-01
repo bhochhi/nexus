@@ -50,7 +50,10 @@ Abstract base class that all agents extend. Provides the common structure: loadi
 - Build system prompt (persona + instructions + delegation summary if present)
 - Enter an iterative tool-calling loop (max 5 turns):
   - Execute LLM with current state and tools
-  - If LLM calls `yield_control`: extract `final_message`, set `current_agent="main_agent"`, mark `delegation_occurred=True`, and break the loop.
+  - If LLM calls `yield_control(final_message, status)`:
+    - Extract `final_message` and `status` (which must be `"complete"` or `"error"`).
+    - If `status="error"`, the system returns the error state to the orchestrator to trigger anti-looping or graceful degradation.
+    - Set `current_agent="main_agent"`, mark `delegation_occurred=True`, and break the loop.
   - If LLM calls other tools: execute the tool natively, append tool result to history, and continue the loop.
   - If LLM responds with plain text: add assistant response to history and break the loop.
 - Return `AgentResult` with response, active_agent, reasoning, state snapshot, and delegation status.
