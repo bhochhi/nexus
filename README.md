@@ -1,2 +1,0 @@
-# nexus
-agentic conversational ai
