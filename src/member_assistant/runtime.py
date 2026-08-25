@@ -1,0 +1,1533 @@
+"""Stable LangGraph orchestration runtime."""
+
+from copy import deepcopy
+from dataclasses import dataclass
+from pathlib import Path
+import re
+from typing import Any, Callable, Dict, List, Optional
+import uuid
+
+from langgraph.graph import END, START, StateGraph
+
+from member_assistant.catalog import SkillCatalog, SkillDefinition
+from member_assistant.config import Settings
+from member_assistant.models import ConversationState, TaskState, WorkflowState
+from member_assistant.observability import Observability, build_observability
+from member_assistant.policy import PolicyEngine
+from member_assistant.providers import (
+    DeterministicProvider,
+    GoalMatch,
+    ModelProvider,
+    SkillGap,
+    build_provider,
+)
+from member_assistant.skills import SkillExecutorRegistry
+from member_assistant.skills.base import SkillContext
+from member_assistant.state_store import SQLiteConversationStore
+from member_assistant.tools import MockTools
+
+
+RISK_ORDER = {
+    "handoff": -1,
+    "informational": 0,
+    "navigation": 1,
+    "read_only": 2,
+    "consequential": 3,
+}
+GOAL_CONFIDENCE_THRESHOLD = 0.5
+GOAL_AMBIGUITY_MARGIN = 0.15
+HANDOFF_OFFER_TURN_THRESHOLD = 3
+SKILL_GAP_CONFIDENCE_THRESHOLD = 0.75
+
+
+@dataclass(frozen=True)
+class AssistantReply:
+    text: str
+    outcome: Optional[Dict[str, Any]]
+    selected_skill: Optional[str]
+    catalog_revision: int
+
+
+class AgentRuntime:
+    """Owns shared conversation behavior while skills remain catalog-driven."""
+
+    def __init__(
+        self,
+        catalog: SkillCatalog,
+        store: SQLiteConversationStore,
+        provider: ModelProvider,
+        tools: MockTools,
+        authenticated: bool = True,
+        authorizations: Optional[List[str]] = None,
+        observability: Optional[Observability] = None,
+    ):
+        self.catalog = catalog
+        self.store = store
+        self.provider = provider
+        self.tools = tools
+        self.authenticated = authenticated
+        self.authorizations = authorizations or ["balances:read", "transfers:internal"]
+        self.observability = observability or Observability()
+        self.executors = SkillExecutorRegistry()
+        self.policy = PolicyEngine()
+        self.graph = self._build_graph()
+        self.catalog.start()
+
+    @classmethod
+    def from_settings(cls, settings: Optional[Settings] = None) -> "AgentRuntime":
+        settings = settings or Settings.from_env()
+        catalog = SkillCatalog(settings.catalog_path, settings.catalog_poll_seconds)
+        store = SQLiteConversationStore(
+            settings.state_db_path,
+            session_ttl_seconds=settings.session_ttl_seconds,
+        )
+        provider = build_provider(settings)
+        tools = MockTools.create(settings.knowledge_path)
+        observability = build_observability(settings)
+        return cls(catalog, store, provider, tools, observability=observability)
+
+    def chat(self, session_id: str, message: str) -> AssistantReply:
+        if not message or not message.strip():
+            raise ValueError("message must not be empty")
+        message = message.strip()
+        provider_metadata = self.provider.observability_metadata()
+        trace_input = self.observability.content(
+            {"message": message},
+            {"message_length": len(message), "content_redacted": True},
+        )
+        with self.observability.turn(
+            session_id,
+            input_value=trace_input,
+            metadata={
+                "catalog_revision": self.catalog.revision,
+                "provider": provider_metadata.get("provider"),
+                "model": provider_metadata.get("model"),
+            },
+        ) as turn_observation:
+            with self.observability.observe("state.load", "span") as state_observation:
+                conversation = deepcopy(self.store.load(session_id))
+                state_observation.update(
+                    output={
+                        "turn_count": conversation["turn_count"],
+                        "active_task": bool(conversation.get("active_task")),
+                        "paused_task_count": len(conversation.get("paused_tasks", [])),
+                    }
+                )
+            result = self.graph.invoke(
+                {
+                    "session_id": session_id,
+                    "conversation": conversation,
+                    "incoming_message": message,
+                    "goals": [],
+                    "response_parts": [],
+                    "audit_events": [],
+                    "catalog_revision": self.catalog.revision,
+                }
+            )
+            final_conversation = result["conversation"]
+            with self.observability.observe(
+                "state.persist",
+                "span",
+                metadata={"audit_event_count": len(result.get("audit_events", [])) + 1},
+            ) as state_observation:
+                self.store.save(session_id, final_conversation)
+                for event in result.get("audit_events", []):
+                    self.store.append_audit(
+                        session_id, event["event_type"], event["payload"]
+                    )
+                self.store.append_audit(
+                    session_id,
+                    "turn_completed",
+                    {
+                        "turn": final_conversation["turn_count"],
+                        "selected_skill": final_conversation["selected_skill"],
+                        "confirmation_status": final_conversation["confirmation_status"],
+                        "outcome_status": (final_conversation.get("outcome") or {}).get(
+                            "status"
+                        ),
+                        "goal_clarification_pending": bool(
+                            final_conversation.get("pending_goal_clarification")
+                        ),
+                        "handoff_offer_pending": bool(
+                            final_conversation.get("pending_handoff_offer")
+                        ),
+                        "no_goal_turn_count": final_conversation.get(
+                            "no_goal_turn_count", 0
+                        ),
+                        "catalog_revision": result.get(
+                            "catalog_revision", self.catalog.revision
+                        ),
+                    },
+                )
+                state_observation.update(output={"status": "saved"})
+            reply = AssistantReply(
+                text=result["reply"],
+                outcome=deepcopy(final_conversation.get("outcome")),
+                selected_skill=final_conversation.get("selected_skill"),
+                catalog_revision=result.get("catalog_revision", self.catalog.revision),
+            )
+            turn_observation.update(
+                output=self.observability.content(
+                    {"reply": reply.text},
+                    {"reply_length": len(reply.text), "content_redacted": True},
+                ),
+                metadata={
+                    "selected_skill": reply.selected_skill,
+                    "outcome_status": (reply.outcome or {}).get("status"),
+                    "confirmation_status": final_conversation["confirmation_status"],
+                    "goal_clarification_pending": bool(
+                        final_conversation.get("pending_goal_clarification")
+                    ),
+                    "handoff_offer_pending": bool(
+                        final_conversation.get("pending_handoff_offer")
+                    ),
+                    "no_goal_turn_count": final_conversation.get(
+                        "no_goal_turn_count", 0
+                    ),
+                    "turn": final_conversation["turn_count"],
+                },
+            )
+            return reply
+
+    def inspect_state(self, session_id: str) -> ConversationState:
+        return self.store.inspect(session_id)
+
+    def close(self) -> None:
+        self.catalog.stop()
+        self.store.close()
+        self.observability.close()
+
+    def _build_graph(self):
+        graph = StateGraph(WorkflowState)
+        graph.add_node("understand", self._traced_node("understand", self._understand))
+        graph.add_node("plan_goals", self._traced_node("plan_goals", self._plan_goals))
+        graph.add_node("supply_input", self._traced_node("supply_input", self._supply_input))
+        graph.add_node(
+            "handle_confirmation",
+            self._traced_node("handle_confirmation", self._handle_confirmation),
+        )
+        graph.add_node("handle_resume", self._traced_node("handle_resume", self._handle_resume))
+        graph.add_node("policy", self._traced_node("policy", self._check_policy))
+        graph.add_node("execute_skill", self._traced_node("execute_skill", self._execute_skill))
+        graph.add_node("advance", self._traced_node("advance", self._advance))
+        graph.add_node("finalize", self._traced_node("finalize", self._finalize))
+
+        graph.add_edge(START, "understand")
+        graph.add_conditional_edges(
+            "understand",
+            lambda state: state["next_action"],
+            {
+                "plan": "plan_goals",
+                "supply_input": "supply_input",
+                "confirmation": "handle_confirmation",
+                "resume": "handle_resume",
+                "finalize": "finalize",
+            },
+        )
+        graph.add_conditional_edges(
+            "plan_goals",
+            lambda state: state["next_action"],
+            {"policy": "policy", "finalize": "finalize"},
+        )
+        graph.add_edge("supply_input", "policy")
+        graph.add_conditional_edges(
+            "handle_confirmation",
+            lambda state: state["next_action"],
+            {"policy": "policy", "advance": "advance", "finalize": "finalize"},
+        )
+        graph.add_edge("handle_resume", "finalize")
+        graph.add_conditional_edges(
+            "policy",
+            lambda state: state["next_action"],
+            {"execute": "execute_skill", "advance": "advance", "finalize": "finalize"},
+        )
+        graph.add_edge("execute_skill", "advance")
+        graph.add_conditional_edges(
+            "advance",
+            lambda state: state["next_action"],
+            {"policy": "policy", "finalize": "finalize"},
+        )
+        graph.add_edge("finalize", END)
+        return graph.compile()
+
+    def _traced_node(
+        self,
+        name: str,
+        function: Callable[[WorkflowState], Dict[str, Any]],
+    ) -> Callable[[WorkflowState], Dict[str, Any]]:
+        def invoke(state: WorkflowState) -> Dict[str, Any]:
+            conversation = state.get("conversation", {})
+            active = conversation.get("active_task") if conversation else None
+            with self.observability.observe(
+                "graph.{}".format(name),
+                "chain",
+                metadata={
+                    "node": name,
+                    "active_skill": active.get("skill_name") if active else None,
+                    "task_status": active.get("status") if active else None,
+                },
+            ) as observation:
+                result = function(state)
+                updated = result.get("conversation", conversation)
+                updated_active = updated.get("active_task") if updated else None
+                observation.update(
+                    output={
+                        "next_action": result.get("next_action"),
+                        "goal_count": len(result.get("goals", state.get("goals", []))),
+                        "selected_skill": updated.get("selected_skill") if updated else None,
+                        "task_status": updated_active.get("status")
+                        if updated_active
+                        else None,
+                    }
+                )
+                return result
+
+        return invoke
+
+    def _understand(self, state: WorkflowState) -> Dict[str, Any]:
+        conversation = state["conversation"]
+        message = state["incoming_message"]
+        conversation["messages"].append({"role": "user", "content": message})
+        if not conversation.get("active_task") and not conversation.get("awaiting_resume"):
+            conversation["selected_skill"] = None
+            conversation["outcome"] = None
+            conversation["confirmation_status"] = "not_required"
+        catalog = self.catalog.list()
+        active = conversation.get("active_task")
+        goal_context = {
+            "active_skill": active.get("skill_name") if active else None,
+            "active_goal": active.get("goal") if active else None,
+            "task_status": active.get("status") if active else None,
+            "missing_field": active.get("missing_field") if active else None,
+            "pending_question": active.get("pending_question") if active else None,
+            "awaiting_resume": conversation.get("awaiting_resume", False),
+            "pending_goal_candidates": [
+                candidate.get("skill_name")
+                for candidate in (
+                    conversation.get("pending_goal_clarification") or {}
+                ).get("candidates", [])
+            ],
+        }
+        with self.observability.observe(
+            "llm.goal_detection",
+            "generation",
+            input_value=self.observability.content(
+                {"message": message, "available_skills": [skill.name for skill in catalog]},
+                {
+                    "message_length": len(message),
+                    "available_skill_count": len(catalog),
+                    "content_redacted": True,
+                },
+            ),
+            metadata=self.provider.observability_metadata(),
+        ) as generation:
+            provider_analysis = self.provider.analyze_message(
+                message, catalog, goal_context
+            )
+            provider_matches = provider_analysis.goals
+            deterministic_matches = DeterministicProvider().identify_goals(
+                message, catalog, goal_context
+            )
+            goal_matches = self._merge_goal_matches(
+                provider_matches, deterministic_matches
+            )
+            provider_metadata = self.provider.observability_metadata()
+            accepted_matches = [
+                match
+                for match in goal_matches
+                if match.confidence >= GOAL_CONFIDENCE_THRESHOLD
+            ]
+            skill_gap = provider_analysis.skill_gap
+            accepted_skill_gap = (
+                skill_gap
+                if skill_gap
+                and skill_gap.confidence >= SKILL_GAP_CONFIDENCE_THRESHOLD
+                else None
+            )
+            generation.update(
+                output={
+                    "goal_count": len(goal_matches),
+                    "candidates": [
+                        {
+                            "skill": match.skill_name,
+                            "goal": match.goal,
+                            "confidence": match.confidence,
+                        }
+                        for match in goal_matches
+                    ],
+                    "accepted_goal_count": len(accepted_matches),
+                    "accepted_candidates": [
+                        {
+                            "skill": match.skill_name,
+                            "goal": match.goal,
+                            "confidence": match.confidence,
+                        }
+                        for match in accepted_matches
+                    ],
+                    "rejected_candidate_count": len(goal_matches)
+                    - len(accepted_matches),
+                    "skill_gap_detected": bool(accepted_skill_gap),
+                    "skill_gap": accepted_skill_gap.as_dict()
+                    if accepted_skill_gap
+                    else None,
+                },
+                metadata=provider_metadata,
+            )
+        self._ensure_member_profile(conversation)
+        goals = [match.as_dict() for match in accepted_matches]
+        deterministic_goals = [
+            match.as_dict()
+            for match in deterministic_matches
+            if match.confidence >= GOAL_CONFIDENCE_THRESHOLD
+        ]
+        updates: Dict[str, Any] = {
+            "conversation": conversation,
+            "goals": goals,
+            "catalog_revision": self.catalog.revision,
+        }
+        if accepted_skill_gap:
+            self._record_skill_gap(
+                updates,
+                state,
+                accepted_skill_gap,
+                catalog,
+                provider_metadata,
+            )
+
+        pending_handoff = conversation.get("pending_handoff_offer")
+        if pending_handoff:
+            if self._is_affirmative(message):
+                handoff_goal = self._handoff_goal(catalog, pending_handoff)
+                conversation["pending_handoff_offer"] = None
+                conversation["no_goal_turn_count"] = 0
+                if not handoff_goal:
+                    updates.update(
+                        next_action="finalize",
+                        response_parts=["Live-agent support is not currently available."],
+                    )
+                else:
+                    updates.update(goals=[handoff_goal], next_action="plan")
+                return updates
+            if self._is_negative(message):
+                conversation["pending_handoff_offer"] = None
+                conversation["no_goal_turn_count"] = 0
+                updates.update(
+                    next_action="finalize",
+                    response_parts=[
+                        "Okay, I won't connect a live agent. Tell me what you'd like to accomplish, "
+                        "and I'll keep helping here."
+                    ],
+                )
+                return updates
+            conversation["pending_handoff_offer"] = None
+
+        pending_goal = conversation.get("pending_goal_clarification")
+        if pending_goal:
+            resolved = self._resolve_pending_goal_clarification(
+                message, goals, deterministic_goals, pending_goal
+            )
+            if resolved is None:
+                if accepted_skill_gap:
+                    return self._respond_to_skill_gap(
+                        updates,
+                        conversation,
+                        accepted_skill_gap,
+                        continuation=pending_goal["question"],
+                    )
+                updates.update(
+                    goals=[],
+                    next_action="finalize",
+                    response_parts=[pending_goal["question"]],
+                )
+                return updates
+            conversation["pending_goal_clarification"] = None
+            goals = resolved
+            updates["goals"] = goals
+
+        handoff_requested = any(
+            self._is_handoff_goal(goal, catalog) for goal in deterministic_goals
+        )
+        if handoff_requested or self._is_frustrated(message):
+            return self._offer_handoff(
+                updates,
+                conversation,
+                reason=(
+                    "member explicitly requested a live agent"
+                    if handoff_requested
+                    else "member expressed frustration"
+                ),
+            )
+
+        if active and active.get("status") == "awaiting_confirmation":
+            if self._is_yes_or_no(message):
+                updates["next_action"] = "confirmation"
+            elif self._has_explicit_new_goal(active, message, goals, deterministic_goals):
+                return self._route_goal_candidates(
+                    updates, conversation, message, goals, deterministic_goals
+                )
+            elif accepted_skill_gap:
+                return self._respond_to_skill_gap(
+                    updates,
+                    conversation,
+                    accepted_skill_gap,
+                    continuation=self._confirmation_copy(
+                        active,
+                        "retry_response",
+                        "Your current request is still waiting. Please answer yes to continue "
+                        "or no to cancel it.",
+                    ),
+                )
+            else:
+                updates.update(
+                    next_action="finalize",
+                    response_parts=[
+                        self._confirmation_copy(
+                            active,
+                            "retry_response",
+                            "Please answer yes to continue the reviewed action or no to cancel it.",
+                        )
+                    ],
+                )
+            return updates
+
+        if active and active.get("status") == "awaiting_input":
+            if self._has_explicit_new_goal(active, message, goals, deterministic_goals):
+                return self._route_goal_candidates(
+                    updates, conversation, message, goals, deterministic_goals
+                )
+            if accepted_skill_gap:
+                return self._respond_to_skill_gap(
+                    updates,
+                    conversation,
+                    accepted_skill_gap,
+                    continuation=(
+                        "Your current request is still here. {}".format(
+                            active.get("pending_question")
+                            or "What information would you like to provide next?"
+                        )
+                    ),
+                )
+            updates.update(goals=[], next_action="supply_input")
+            return updates
+
+        if conversation.get("awaiting_resume"):
+            if self._is_resume_or_discard(message):
+                updates["next_action"] = "resume"
+            elif goals:
+                return self._route_goal_candidates(
+                    updates, conversation, message, goals, deterministic_goals
+                )
+            elif accepted_skill_gap:
+                return self._respond_to_skill_gap(
+                    updates,
+                    conversation,
+                    accepted_skill_gap,
+                    continuation=(
+                        "Your paused request is still available. Please say resume to continue "
+                        "it or discard to remove it."
+                    ),
+                )
+            else:
+                updates.update(
+                    next_action="finalize",
+                    response_parts=[
+                        "Please say resume to continue the paused task or discard to remove it."
+                    ],
+                )
+            return updates
+
+        if self._is_greeting_or_capability_question(message):
+            conversation["no_goal_turn_count"] = 0
+            updates.update(
+                next_action="finalize",
+                response_parts=[self._reception_response(conversation, catalog)],
+            )
+            return updates
+
+        if goals:
+            if accepted_skill_gap:
+                updates["response_parts"] = [
+                    self._skill_gap_response(accepted_skill_gap)
+                ]
+            return self._route_goal_candidates(
+                updates, conversation, message, goals, deterministic_goals
+            )
+
+        if accepted_skill_gap:
+            return self._respond_to_skill_gap(
+                updates, conversation, accepted_skill_gap
+            )
+        conversation["no_goal_turn_count"] = int(
+            conversation.get("no_goal_turn_count", 0)
+        ) + 1
+        if conversation["no_goal_turn_count"] >= HANDOFF_OFFER_TURN_THRESHOLD:
+            return self._offer_handoff(
+                updates,
+                conversation,
+                reason="several turns did not produce a supported goal",
+            )
+        updates.update(
+            next_action="finalize",
+            response_parts=[
+                self._unmatched_reception_response(conversation, message, catalog)
+            ],
+        )
+        return updates
+
+    def _record_skill_gap(
+        self,
+        updates: Dict[str, Any],
+        state: WorkflowState,
+        skill_gap: SkillGap,
+        catalog: List[SkillDefinition],
+        provider_metadata: Dict[str, Any],
+    ) -> None:
+        payload = {
+            "category": skill_gap.category,
+            "objective": skill_gap.objective,
+            "confidence": skill_gap.confidence,
+            "catalog_revision": self.catalog.revision,
+            "available_skill_count": len(catalog),
+            "provider": provider_metadata.get("provider"),
+            "model": provider_metadata.get("model"),
+        }
+        updates["audit_events"] = state.get("audit_events", []) + [
+            {"event_type": "skill_gap", "payload": payload}
+        ]
+        with self.observability.observe(
+            "skill_gap.detected",
+            "event",
+            metadata=payload,
+        ) as observation:
+            observation.update(output={"recorded": True})
+
+    @staticmethod
+    def _skill_gap_response(skill_gap: SkillGap) -> str:
+        return (
+            "I understand that you'd like to {}. I'm sorry, but I don't currently have "
+            "the ability to help with that."
+        ).format(skill_gap.objective.rstrip("."))
+
+    def _respond_to_skill_gap(
+        self,
+        updates: Dict[str, Any],
+        conversation: ConversationState,
+        skill_gap: SkillGap,
+        continuation: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        conversation["no_goal_turn_count"] = int(
+            conversation.get("no_goal_turn_count", 0)
+        ) + 1
+        response_parts = [self._skill_gap_response(skill_gap)]
+        if continuation:
+            response_parts.append(continuation)
+        if conversation["no_goal_turn_count"] >= HANDOFF_OFFER_TURN_THRESHOLD:
+            offer = self._new_handoff_offer(
+                conversation, "repeated requests need an unavailable capability"
+            )
+            conversation["pending_handoff_offer"] = offer
+            response_parts.append(offer["question"])
+        updates.update(
+            goals=[], next_action="finalize", response_parts=response_parts
+        )
+        return updates
+
+    def _plan_goals(self, state: WorkflowState) -> Dict[str, Any]:
+        conversation = state["conversation"]
+        goals = state.get("goals", [])
+        definitions = {skill.name: skill for skill in self.catalog.list()}
+        valid_goals = [goal for goal in goals if goal["skill_name"] in definitions]
+        if not valid_goals:
+            return {
+                "conversation": conversation,
+                "response_parts": ["That capability is not currently available."],
+                "next_action": "finalize",
+            }
+
+        current = conversation.get("active_task")
+        if current:
+            self._pause_current_work(conversation)
+        conversation["awaiting_resume"] = False
+        conversation["pending_clarification"] = None
+        conversation["pending_goal_clarification"] = None
+        conversation["confirmation_status"] = "not_required"
+        conversation["no_goal_turn_count"] = 0
+
+        handoff_goal = next(
+            (
+                goal
+                for goal in valid_goals
+                if definitions[goal["skill_name"]].risk_tier == "handoff"
+            ),
+            None,
+        )
+        if handoff_goal:
+            valid_goals = [handoff_goal]
+            active_context = current or (
+                conversation["paused_tasks"][0] if conversation["paused_tasks"] else None
+            )
+            handoff_inputs = handoff_goal.setdefault("inputs", {})
+            handoff_inputs.setdefault(
+                "reason", "member requested a person or expressed frustration"
+            )
+            handoff_inputs.setdefault(
+                "active_goal",
+                active_context.get("goal", "general assistance")
+                if active_context
+                else "general assistance",
+            )
+            handoff_inputs.setdefault(
+                "completed_steps",
+                active_context.get("completed_steps", []) if active_context else [],
+            )
+
+        valid_goals.sort(
+            key=lambda goal: RISK_ORDER[definitions[goal["skill_name"]].risk_tier]
+        )
+        tasks = [self._task_from_goal(goal, definitions[goal["skill_name"]]) for goal in valid_goals]
+        conversation["active_task"] = tasks[0]
+        conversation["queued_tasks"] = tasks[1:]
+        return {"conversation": conversation, "next_action": "policy"}
+
+    def _supply_input(self, state: WorkflowState) -> Dict[str, Any]:
+        conversation = state["conversation"]
+        task = conversation.get("active_task")
+        if not task:
+            return {
+                "conversation": conversation,
+                "response_parts": ["There is no active task awaiting information."],
+            }
+        definition = self.catalog.get(task["skill_name"])
+        executor = self.executors.get(definition.skill_type) if definition else None
+        if not definition or not executor:
+            task["status"] = "failed"
+            return {
+                "conversation": conversation,
+                "response_parts": ["The paused capability is no longer available."],
+            }
+        executor.collect_input(
+            task,
+            state["incoming_message"],
+            self._skill_context(state, definition),
+        )
+        task["status"] = "ready"
+        conversation["pending_clarification"] = None
+        return {"conversation": conversation, "slot_attempted": True}
+
+    def _handle_confirmation(self, state: WorkflowState) -> Dict[str, Any]:
+        conversation = state["conversation"]
+        message = state["incoming_message"]
+        task = conversation.get("active_task")
+        if not task:
+            return {
+                "conversation": conversation,
+                "response_parts": ["There is no action awaiting confirmation."],
+                "next_action": "finalize",
+            }
+        if self._is_affirmative(message):
+            conversation["confirmation_status"] = "confirmed"
+            return {"conversation": conversation, "next_action": "policy"}
+        if self._is_negative(message):
+            task["status"] = "cancelled"
+            conversation["confirmation_status"] = "declined"
+            conversation["outcome"] = {"status": "cancelled"}
+            return {
+                "conversation": conversation,
+                "response_parts": [
+                    self._confirmation_copy(
+                        task,
+                        "decline_response",
+                        "The reviewed action was cancelled; no action was taken.",
+                    )
+                ],
+                "next_action": "advance",
+                "audit_events": state.get("audit_events", [])
+                + [
+                    {
+                        "event_type": "confirmation_declined",
+                        "payload": {"skill": task["skill_name"], "task_id": task["id"]},
+                    }
+                ],
+            }
+        return {
+            "conversation": conversation,
+            "response_parts": [
+                self._confirmation_copy(
+                    task,
+                    "retry_response",
+                    "Please answer yes to continue or no to cancel.",
+                )
+            ],
+            "next_action": "finalize",
+        }
+
+    def _handle_resume(self, state: WorkflowState) -> Dict[str, Any]:
+        conversation = state["conversation"]
+        paused = conversation["paused_tasks"]
+        if not paused:
+            conversation["awaiting_resume"] = False
+            return {
+                "conversation": conversation,
+                "response_parts": ["There is no paused task to resume."],
+            }
+        if self._is_affirmative(state["incoming_message"], resume_words=True):
+            task = paused.pop(0)
+            task["status"] = task.pop("resume_status", "awaiting_input")
+            conversation["active_task"] = task
+            conversation["awaiting_resume"] = False
+            conversation["selected_skill"] = task["skill_name"]
+            conversation["outcome"] = task.get("outcome")
+            question = task.get("pending_question")
+            if task["status"] == "awaiting_input" and question:
+                conversation["pending_clarification"] = {
+                    "task_id": task["id"],
+                    "field": task.get("missing_field") or "input",
+                    "question": question,
+                }
+            elif task["status"] == "awaiting_confirmation":
+                conversation["confirmation_status"] = "pending"
+            return {
+                "conversation": conversation,
+                "response_parts": ["Resuming your {} request. {}".format(task["goal"], question or "")],
+            }
+
+        discarded = paused.pop(0)
+        conversation["awaiting_resume"] = bool(paused)
+        conversation["outcome"] = {"status": "discarded", "task_id": discarded["id"]}
+        suffix = (
+            " Would you like to resume or discard the next paused task?" if paused else ""
+        )
+        return {
+            "conversation": conversation,
+            "response_parts": ["I discarded the paused {} request.{}".format(discarded["goal"], suffix)],
+        }
+
+    def _check_policy(self, state: WorkflowState) -> Dict[str, Any]:
+        conversation = state["conversation"]
+        task = conversation.get("active_task")
+        if not task:
+            return {"conversation": conversation, "next_action": "finalize"}
+        definition = self.catalog.get(task["skill_name"])
+        executor = self.executors.get(definition.skill_type) if definition else None
+        if not definition or not executor:
+            task["status"] = "failed"
+            conversation["outcome"] = {"status": "skill_unavailable"}
+            return {
+                "conversation": conversation,
+                "response_parts": state.get("response_parts", [])
+                + ["That skill is no longer available; no action was taken."],
+                "next_action": "advance",
+            }
+        with self.observability.observe(
+            "policy.evaluate",
+            "guardrail",
+            metadata={
+                "skill": definition.name,
+                "skill_version": definition.version,
+                "risk_tier": definition.risk_tier,
+                "task_status": task["status"],
+                "confirmation_status": conversation["confirmation_status"],
+                "authentication_present": self.authenticated,
+            },
+        ) as policy_observation:
+            decision = self.policy.evaluate(
+                definition=definition,
+                required_tools=executor.required_tools(definition),
+                authenticated=self.authenticated,
+                authorizations=self.authorizations,
+                task_status=task["status"],
+                confirmation_status=conversation["confirmation_status"],
+            )
+            policy_observation.update(
+                output={"allowed": decision.allowed, "decision": decision.event}
+            )
+        audit_events = state.get("audit_events", []) + [
+            {
+                "event_type": decision.event,
+                "payload": {
+                    "skill": definition.name,
+                    "skill_version": definition.version,
+                    "risk_tier": definition.risk_tier,
+                    "allowed": decision.allowed,
+                },
+            }
+        ]
+        if decision.allowed:
+            return {
+                "conversation": conversation,
+                "next_action": "execute",
+                "audit_events": audit_events,
+            }
+        if decision.event == "confirmation_denied":
+            return {
+                "conversation": conversation,
+                "response_parts": state.get("response_parts", []) + [decision.reason],
+                "next_action": "finalize",
+                "audit_events": audit_events,
+            }
+        task["status"] = "failed"
+        conversation["outcome"] = {"status": "policy_denied", "reason": decision.event}
+        return {
+            "conversation": conversation,
+            "response_parts": state.get("response_parts", []) + [decision.reason],
+            "next_action": "advance",
+            "audit_events": audit_events,
+        }
+
+    def _execute_skill(self, state: WorkflowState) -> Dict[str, Any]:
+        conversation = state["conversation"]
+        task = conversation["active_task"]
+        if task is None:
+            return {"conversation": conversation}
+        definition = self.catalog.get(task["skill_name"])
+        executor = self.executors.get(definition.skill_type) if definition else None
+        if not definition or not executor:
+            task["status"] = "failed"
+            conversation["outcome"] = {"status": "skill_unavailable"}
+            return {
+                "conversation": conversation,
+                "response_parts": state.get("response_parts", [])
+                + ["That skill became unavailable; no action was taken."],
+            }
+        conversation["selected_skill"] = definition.name
+        completed_before = len(task.get("completed_steps", []))
+        try:
+            with self.observability.observe(
+                "skill.{}".format(definition.name),
+                "agent",
+                metadata={
+                    "skill": definition.name,
+                    "skill_version": definition.version,
+                    "skill_type": definition.skill_type,
+                    "risk_tier": definition.risk_tier,
+                    "goal": task["goal"],
+                    "task_id": task["id"],
+                },
+            ) as skill_observation:
+                result = executor.execute(task, self._skill_context(state, definition))
+                skill_observation.update(
+                    output={
+                        "status": result.status,
+                        "completed_step_count": len(result.completed_steps),
+                    }
+                )
+        except Exception:
+            task["status"] = "failed"
+            conversation["outcome"] = {"status": "tool_error"}
+            return {
+                "conversation": conversation,
+                "response_parts": state.get("response_parts", [])
+                + [
+                    "The mock integration could not complete that request. "
+                    "No financial action was taken."
+                ],
+                "audit_events": state.get("audit_events", [])
+                + [
+                    {
+                        "event_type": "tool_error",
+                        "payload": {
+                            "skill": definition.name,
+                            "tools": list(executor.required_tools(definition)),
+                        },
+                    }
+                ],
+            }
+
+        task["status"] = result.status
+        task["inputs"] = result.inputs
+        task["missing_field"] = result.missing_field
+        task["pending_question"] = result.pending_question
+        task["completed_steps"] = result.completed_steps
+        task["outcome"] = result.outcome
+        conversation["outcome"] = result.outcome
+        if state.get("slot_attempted"):
+            if (
+                result.status == "awaiting_input"
+                and len(result.completed_steps) <= completed_before
+            ):
+                conversation["no_goal_turn_count"] = int(
+                    conversation.get("no_goal_turn_count", 0)
+                ) + 1
+            else:
+                conversation["no_goal_turn_count"] = 0
+        if result.status == "awaiting_input":
+            conversation["pending_clarification"] = {
+                "task_id": task["id"],
+                "field": result.missing_field or "input",
+                "question": result.pending_question or result.response,
+            }
+            conversation["confirmation_status"] = "not_required"
+        elif result.status == "awaiting_confirmation":
+            conversation["pending_clarification"] = None
+            conversation["confirmation_status"] = "pending"
+        elif result.status == "completed":
+            conversation["pending_clarification"] = None
+            if definition.confirmation_required:
+                conversation["confirmation_status"] = "consumed"
+            if definition.risk_tier == "handoff":
+                conversation["handoff_status"] = (result.outcome or {}).get("status")
+        audit = {
+            "event_type": "skill_result",
+            "payload": {
+                "skill": definition.name,
+                "skill_version": definition.version,
+                "status": result.status,
+                "tools": list(executor.required_tools(definition)),
+            },
+        }
+        response_parts = state.get("response_parts", []) + [result.response]
+        if (
+            result.status == "awaiting_input"
+            and conversation.get("no_goal_turn_count", 0)
+            >= HANDOFF_OFFER_TURN_THRESHOLD
+            and not conversation.get("pending_handoff_offer")
+        ):
+            offer = self._new_handoff_offer(
+                conversation, "several attempts did not provide the needed information"
+            )
+            conversation["pending_handoff_offer"] = offer
+            response_parts.append(offer["question"])
+        return {
+            "conversation": conversation,
+            "response_parts": response_parts,
+            "audit_events": state.get("audit_events", []) + [audit],
+        }
+
+    def _advance(self, state: WorkflowState) -> Dict[str, Any]:
+        conversation = state["conversation"]
+        task = conversation.get("active_task")
+        if task and task.get("status") in {"awaiting_input", "awaiting_confirmation"}:
+            return {"conversation": conversation, "next_action": "finalize"}
+        if task and task.get("status") not in {"completed", "failed", "cancelled"}:
+            return {"conversation": conversation, "next_action": "finalize"}
+
+        completed_was_handoff = False
+        if task:
+            definition = self.catalog.get(task["skill_name"])
+            completed_was_handoff = bool(definition and definition.risk_tier == "handoff")
+            conversation["active_task"] = None
+
+        if conversation["queued_tasks"]:
+            conversation["active_task"] = conversation["queued_tasks"].pop(0)
+            conversation["confirmation_status"] = "not_required"
+            return {"conversation": conversation, "next_action": "policy"}
+
+        response_parts = state.get("response_parts", [])
+        if conversation["paused_tasks"] and not completed_was_handoff:
+            conversation["awaiting_resume"] = True
+            paused = conversation["paused_tasks"][0]
+            response_parts = response_parts + [
+                "Would you like to resume or discard your paused {} request?".format(
+                    paused["goal"]
+                )
+            ]
+        return {
+            "conversation": conversation,
+            "response_parts": response_parts,
+            "next_action": "finalize",
+        }
+
+    def _finalize(self, state: WorkflowState) -> Dict[str, Any]:
+        conversation = state["conversation"]
+        parts = [part.strip() for part in state.get("response_parts", []) if part.strip()]
+        reply = "\n\n".join(parts) if parts else "I wasn't able to produce a safe response."
+        if not conversation.get("greeted"):
+            preferred_name = conversation.get("member_profile", {}).get(
+                "preferred_name", "Member"
+            )
+            greeting = "Hi {}.".format(preferred_name)
+            if not reply.casefold().startswith(greeting.casefold()):
+                reply = "{} {}".format(greeting, reply)
+            conversation["greeted"] = True
+        conversation["messages"].append({"role": "assistant", "content": reply})
+        conversation["turn_count"] += 1
+        return {"conversation": conversation, "reply": reply}
+
+    def _skill_context(
+        self, state: WorkflowState, definition: SkillDefinition
+    ) -> SkillContext:
+        return SkillContext(
+            definition=definition,
+            session_id=state["session_id"],
+            member_ref="mock-member-001",
+            authenticated=self.authenticated,
+            authorizations=list(self.authorizations),
+            confirmation_status=state["conversation"]["confirmation_status"],
+            tools=self.tools,
+            provider=self.provider,
+            observability=self.observability,
+            member_profile=dict(state["conversation"].get("member_profile", {})),
+        )
+
+    @staticmethod
+    def _task_from_goal(goal: Dict[str, Any], definition: SkillDefinition) -> TaskState:
+        return {
+            "id": str(uuid.uuid4()),
+            "skill_name": definition.name,
+            "skill_version": definition.version,
+            "goal": goal["goal"],
+            "status": "ready",
+            "inputs": dict(goal.get("inputs", {})),
+            "completed_steps": [],
+            "missing_field": None,
+            "pending_question": None,
+            "outcome": None,
+            "workflow_step": 0,
+            "variables": {},
+        }
+
+    @staticmethod
+    def _pause_current_work(conversation: ConversationState) -> None:
+        active = conversation.get("active_task")
+        if active:
+            active["resume_status"] = active.get("status", "ready")
+            active["status"] = "paused"
+            conversation["paused_tasks"].append(active)
+        for queued in conversation["queued_tasks"]:
+            queued["resume_status"] = queued.get("status", "ready")
+            queued["status"] = "paused"
+            conversation["paused_tasks"].append(queued)
+        conversation["active_task"] = None
+        conversation["queued_tasks"] = []
+
+    @staticmethod
+    def _merge_goal_matches(
+        provider_matches: List[GoalMatch], deterministic_matches: List[GoalMatch]
+    ) -> List[GoalMatch]:
+        merged: Dict[tuple, GoalMatch] = {}
+        for match in provider_matches + deterministic_matches:
+            key = (match.skill_name, match.goal)
+            existing = merged.get(key)
+            if existing is None:
+                merged[key] = match
+                continue
+            merged[key] = GoalMatch(
+                skill_name=match.skill_name,
+                goal=match.goal,
+                confidence=max(existing.confidence, match.confidence),
+                inputs={**existing.inputs, **match.inputs},
+            )
+        return sorted(merged.values(), key=lambda item: item.confidence, reverse=True)
+
+    def _route_goal_candidates(
+        self,
+        updates: Dict[str, Any],
+        conversation: ConversationState,
+        message: str,
+        goals: List[Dict[str, Any]],
+        deterministic_goals: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        catalog = self.catalog.list()
+        goals = [goal for goal in goals if not self._is_handoff_goal(goal, catalog)]
+        if not goals:
+            updates.update(goals=[], next_action="finalize")
+            return updates
+
+        deterministic_keys = {
+            (goal["skill_name"], goal["goal"])
+            for goal in deterministic_goals
+            if not self._is_handoff_goal(goal, catalog)
+        }
+        if self._is_explicit_multi_goal(message) and len(deterministic_keys) > 1:
+            selected = [
+                goal
+                for goal in goals
+                if (goal["skill_name"], goal["goal"]) in deterministic_keys
+            ]
+            conversation["pending_goal_clarification"] = None
+            conversation["no_goal_turn_count"] = 0
+            updates.update(goals=selected, next_action="plan")
+            return updates
+
+        ranked = sorted(goals, key=lambda goal: float(goal.get("confidence", 0)), reverse=True)
+        if len(ranked) == 1 or (
+            float(ranked[0].get("confidence", 0))
+            - float(ranked[1].get("confidence", 0))
+            >= GOAL_AMBIGUITY_MARGIN
+        ):
+            conversation["pending_goal_clarification"] = None
+            conversation["no_goal_turn_count"] = 0
+            updates.update(goals=[ranked[0]], next_action="plan")
+            return updates
+
+        candidates = ranked[:2]
+        labels = [
+            self._goal_label(candidate["skill_name"], candidate["goal"])
+            for candidate in candidates
+        ]
+        question = "Did you want to {} or {}?".format(labels[0], labels[1])
+        conversation["pending_goal_clarification"] = {
+            "candidates": candidates,
+            "question": question,
+        }
+        updates.update(goals=[], next_action="finalize", response_parts=[question])
+        return updates
+
+    @staticmethod
+    def _resolve_pending_goal_clarification(
+        message: str,
+        goals: List[Dict[str, Any]],
+        deterministic_goals: List[Dict[str, Any]],
+        pending: Dict[str, Any],
+    ) -> Optional[List[Dict[str, Any]]]:
+        candidates = list(pending.get("candidates", []))
+        candidate_keys = {
+            (candidate["skill_name"], candidate["goal"]): candidate
+            for candidate in candidates
+        }
+        normalized = " ".join(re.findall(r"[a-z0-9]+", message.casefold()))
+        if normalized in {"first", "first one", "option one", "one"} and candidates:
+            return [candidates[0]]
+        if normalized in {"second", "second one", "option two", "two"} and len(candidates) > 1:
+            return [candidates[1]]
+
+        matching = []
+        for goal in goals + deterministic_goals:
+            key = (goal["skill_name"], goal["goal"])
+            if key in candidate_keys and key not in {
+                (item["skill_name"], item["goal"]) for item in matching
+            }:
+                matching.append(goal)
+        if len(matching) == 1:
+            return matching
+
+        message_tokens = set(normalized.split())
+        lexical = []
+        for candidate in candidates:
+            candidate_tokens = set(
+                re.findall(
+                    r"[a-z0-9]+",
+                    "{} {}".format(
+                        candidate["skill_name"], candidate["goal"]
+                    ).casefold(),
+                )
+            )
+            if message_tokens.intersection(candidate_tokens):
+                lexical.append(candidate)
+        if len(lexical) == 1:
+            return lexical
+
+        unrelated = [
+            goal
+            for goal in goals
+            if (goal["skill_name"], goal["goal"]) not in candidate_keys
+        ]
+        return unrelated or None
+
+    def _has_explicit_new_goal(
+        self,
+        active: TaskState,
+        message: str,
+        goals: List[Dict[str, Any]],
+        deterministic_goals: List[Dict[str, Any]],
+    ) -> bool:
+        different_deterministic = [
+            goal
+            for goal in deterministic_goals
+            if goal["skill_name"] != active.get("skill_name")
+        ]
+        if different_deterministic:
+            return True
+        different = sorted(
+            [goal for goal in goals if goal["skill_name"] != active.get("skill_name")],
+            key=lambda goal: float(goal.get("confidence", 0)),
+            reverse=True,
+        )
+        if not different:
+            return False
+        normalized = message.casefold()
+        if any(
+            marker in normalized
+            for marker in ("instead", "actually", "new question", "forget that", "stop that")
+        ):
+            return True
+        top = float(different[0].get("confidence", 0))
+        runner_up = float(different[1].get("confidence", 0)) if len(different) > 1 else 0.0
+        request_cue = re.search(
+            r"\b(i need|i want|can you|could you|how|what|forgot|help me)\b", normalized
+        )
+        return bool(request_cue and top >= 0.85 and top - runner_up >= 0.2)
+
+    def _offer_handoff(
+        self,
+        updates: Dict[str, Any],
+        conversation: ConversationState,
+        reason: str,
+    ) -> Dict[str, Any]:
+        offer = self._new_handoff_offer(conversation, reason)
+        conversation["pending_handoff_offer"] = offer
+        updates.update(
+            goals=[],
+            next_action="finalize",
+            response_parts=[offer["question"]],
+        )
+        return updates
+
+    @staticmethod
+    def _new_handoff_offer(
+        conversation: ConversationState, reason: str
+    ) -> Dict[str, Any]:
+        active = conversation.get("active_task")
+        if not active and conversation.get("paused_tasks"):
+            active = conversation["paused_tasks"][0]
+        return {
+            "reason": reason,
+            "active_goal": active.get("goal", "general assistance")
+            if active
+            else "general assistance",
+            "completed_steps": list(active.get("completed_steps", [])) if active else [],
+            "question": (
+                "It looks like you may benefit from additional help. Would you like me to "
+                "connect you with a live agent? Please answer yes or no."
+            ),
+        }
+
+    @staticmethod
+    def _handoff_goal(
+        catalog: List[SkillDefinition], offer: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        definition = next((item for item in catalog if item.risk_tier == "handoff"), None)
+        if not definition:
+            return None
+        return {
+            "skill_name": definition.name,
+            "goal": definition.supported_goals[0]["name"],
+            "confidence": 1.0,
+            "inputs": {
+                "reason": offer["reason"],
+                "active_goal": offer["active_goal"],
+                "completed_steps": list(offer.get("completed_steps", [])),
+            },
+        }
+
+    @staticmethod
+    def _is_handoff_goal(goal: Dict[str, Any], catalog: List[SkillDefinition]) -> bool:
+        definition = next(
+            (item for item in catalog if item.name == goal.get("skill_name")), None
+        )
+        return bool(definition and definition.risk_tier == "handoff")
+
+    def _ensure_member_profile(self, conversation: ConversationState) -> None:
+        if conversation.get("member_profile"):
+            return
+        with self.observability.observe(
+            "tool.mock_member_profile.get",
+            "tool",
+            input_value={"member_ref": "redacted"},
+            metadata={"tool": "mock_member_profile", "action": "get"},
+        ) as observation:
+            try:
+                profile = self.tools.invoke(
+                    "mock_member_profile", "get", {"member_ref": "mock-member-001"}
+                )
+                observation.update(
+                    output={"profile_loaded": True}, metadata={"tool_status": "success"}
+                )
+            except Exception:
+                profile = {
+                    "member_ref": "mock-member-001",
+                    "first_name": "Member",
+                    "preferred_name": "Member",
+                }
+                observation.update(
+                    output={"profile_loaded": False}, status="error"
+                )
+        conversation["member_profile"] = profile
+
+    def _reception_response(
+        self,
+        conversation: ConversationState,
+        catalog: List[SkillDefinition],
+    ) -> str:
+        name = conversation.get("member_profile", {}).get("preferred_name", "Member")
+        capabilities = self._member_capability_list(catalog)
+        if not capabilities:
+            return (
+                "Hi {}. I'm glad you reached out. Tell me what you need help with, and I'll "
+                "do my best to point you in the right direction."
+            ).format(name)
+        return (
+            "Hi {}. I'm glad you reached out. I can currently help you {}. "
+            "What can I help you with today?"
+        ).format(name, self._join_choices(capabilities))
+
+    def _unmatched_reception_response(
+        self,
+        conversation: ConversationState,
+        message: str,
+        catalog: List[SkillDefinition],
+    ) -> str:
+        name = conversation.get("member_profile", {}).get("preferred_name", "Member")
+        capabilities = self._member_capability_list(catalog)
+        capability_text = self._join_choices(capabilities)
+        is_first_response = not conversation.get("greeted", False)
+        greeting = "Hi {member_name}. " if is_first_response else ""
+        if capabilities:
+            fallback = (
+                greeting
+                + "Thanks for explaining. I want to make sure I point you in "
+                "the right direction. I can currently help you {capability_text}. Could you "
+                "tell me a little more about what you need?"
+            )
+        else:
+            fallback = (
+                greeting
+                + "Thanks for explaining. I want to make sure I understand. "
+                "Could you tell me a little more about what you need?"
+            )
+        facts = {
+            "member_name": name,
+            "member_message": message,
+            "available_services": capabilities,
+            "capability_text": capability_text,
+            "is_first_response": is_first_response,
+            "template": fallback,
+        }
+        instruction = (
+            "Act as a warm, respectful member-service receptionist. The goal router found no "
+            "currently supported goal for this message. If the request itself is clear, "
+            "briefly acknowledge the specific intent and explain that the service is not "
+            "currently available. If the request is genuinely unclear, ask one useful, "
+            "focused clarification question. Mention only services in available_services, "
+            "and only when helpful. Do not expose routing, internal skill names, or system "
+            "behavior. Do not offer a live agent on this turn. Do not invent account facts or "
+            "claim that an action was taken. If is_first_response is true, greet the member "
+            "by name once; otherwise do not repeat the member's name merely for style. Respond "
+            "in one to three concise sentences."
+        )
+        with self.observability.observe(
+            "llm.reception_response",
+            "generation",
+            input_value=self.observability.content(
+                {
+                    "message": message,
+                    "available_services": capabilities,
+                },
+                {
+                    "message_length": len(message),
+                    "available_service_count": len(capabilities),
+                    "content_redacted": True,
+                },
+            ),
+            metadata=self.provider.observability_metadata(),
+        ) as generation:
+            response = self.provider.generate_response(instruction, facts)
+            generation.update(
+                output=self.observability.content(
+                    {"response": response},
+                    {"response_length": len(response), "content_redacted": True},
+                ),
+                metadata=self.provider.observability_metadata(),
+            )
+        if is_first_response:
+            normalized = response.casefold().lstrip()
+            if not normalized.startswith(
+                ("hi {}".format(name.casefold()), "hello {}".format(name.casefold()))
+            ):
+                response = "Hi {}. {}".format(name, response)
+            conversation["greeted"] = True
+        return response
+
+    def _member_capability_list(
+        self, catalog: List[SkillDefinition]
+    ) -> List[str]:
+        labels: List[str] = []
+        for skill in catalog:
+            # Handoff remains discoverable through an explicit request, frustration, or the
+            # turn threshold; it is not proactively advertised by the receptionist.
+            if skill.risk_tier == "handoff":
+                continue
+            for goal in skill.supported_goals:
+                label = self._goal_label(skill.name, str(goal["name"]))
+                if label not in labels:
+                    labels.append(label)
+        return labels
+
+    @staticmethod
+    def _join_choices(values: List[str]) -> str:
+        if not values:
+            return ""
+        if len(values) == 1:
+            return values[0]
+        if len(values) == 2:
+            return "{} or {}".format(values[0], values[1])
+        return "{}, or {}".format(", ".join(values[:-1]), values[-1])
+
+    @staticmethod
+    def _is_greeting_or_capability_question(message: str) -> bool:
+        normalized = " ".join(re.findall(r"[a-z]+", message.casefold()))
+        return normalized in {
+            "hi",
+            "hello",
+            "hey",
+            "good morning",
+            "good afternoon",
+            "good evening",
+        } or any(
+            phrase in normalized
+            for phrase in ("what can you do", "how can you help", "what are your skills")
+        )
+
+    @staticmethod
+    def _is_frustrated(message: str) -> bool:
+        normalized = message.casefold()
+        return any(
+            phrase in normalized
+            for phrase in (
+                "not helping",
+                "this is useless",
+                "so frustrated",
+                "i am frustrated",
+                "terrible service",
+            )
+        )
+
+    @staticmethod
+    def _is_explicit_multi_goal(message: str) -> bool:
+        return bool(re.search(r"\b(and|also|then|as well as)\b", message.casefold()))
+
+    def _goal_label(self, skill_name: str, goal_name: str) -> str:
+        definition = self.catalog.get(skill_name)
+        if definition:
+            goal = next(
+                (
+                    candidate
+                    for candidate in definition.supported_goals
+                    if candidate.get("name") == goal_name
+                ),
+                None,
+            )
+            if goal and goal.get("display_name"):
+                return str(goal["display_name"])
+        return goal_name.replace("_", " ")
+
+    def _confirmation_copy(self, task: TaskState, key: str, default: str) -> str:
+        definition = self.catalog.get(task["skill_name"])
+        if not definition:
+            return default
+        step_index = int(task.get("workflow_step", 0))
+        steps = definition.workflow.get("steps", [])
+        if step_index < len(steps) and steps[step_index].get("op") == "confirm":
+            return str(steps[step_index].get(key, default))
+        return default
+
+    @staticmethod
+    def _is_affirmative(message: str, resume_words: bool = False) -> bool:
+        normalized = re.sub(r"[^a-z ]", "", message.lower()).strip()
+        words = {"yes", "y", "confirm", "approve", "proceed", "do it"}
+        if resume_words:
+            words.update({"resume", "continue", "pick it back up"})
+        return normalized in words
+
+    @staticmethod
+    def _is_negative(message: str) -> bool:
+        normalized = re.sub(r"[^a-z ]", "", message.lower()).strip()
+        return normalized in {"no", "n", "cancel", "decline", "stop", "discard"}
+
+    @classmethod
+    def _is_yes_or_no(cls, message: str) -> bool:
+        return cls._is_affirmative(message) or cls._is_negative(message)
+
+    @classmethod
+    def _is_resume_or_discard(cls, message: str) -> bool:
+        return cls._is_affirmative(message, resume_words=True) or cls._is_negative(message)

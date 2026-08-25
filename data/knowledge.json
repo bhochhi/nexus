@@ -1,0 +1,19 @@
+{
+  "catalog_version": "2026-08-01",
+  "articles": [
+    {
+      "id": "KB-001",
+      "title": "Mock overdraft protection overview",
+      "keywords": ["overdraft", "protection", "checking", "linked savings"],
+      "answer": "In this mock policy, overdraft protection can use available funds from an eligible linked savings account when a checking transaction exceeds the checking balance.",
+      "disclosure": "Fees and eligibility can vary; review the approved account terms."
+    },
+    {
+      "id": "KB-002",
+      "title": "Mock deposit insurance overview",
+      "keywords": ["deposit", "insurance", "insured", "coverage"],
+      "answer": "This POC's sample content says eligible deposit accounts are insured subject to the ownership categories and limits stated in the approved account disclosures.",
+      "disclosure": "This is demonstration content, not a coverage determination."
+    }
+  ]
+}

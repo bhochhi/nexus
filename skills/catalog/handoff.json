@@ -1,0 +1,63 @@
+{
+  "name": "live_agent_handoff",
+  "version": "2.0.0",
+  "type": "human_handoff",
+  "description": "Creates a mock live-agent case with minimized context.",
+  "owner": "Contact Center Operations",
+  "risk_tier": "handoff",
+  "supported_goals": [
+    {
+      "name": "request_live_agent",
+      "display_name": "speak with a live agent",
+      "keywords": ["live agent", "human", "person", "representative", "talk to someone"],
+      "examples": ["Get me a person.", "I want a live agent."]
+    }
+  ],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "reason": {"type": "string"},
+      "active_goal": {"type": "string"},
+      "completed_steps": {"type": "array", "items": {"type": "string"}}
+    }
+  },
+  "input_extraction": {},
+  "allowed_tools": ["mock_live_agent"],
+  "response_template": "I've queued a mock live agent in {queue}. Case {case_id}; they will receive a concise summary.",
+  "auth_required": false,
+  "confirmation_required": false,
+  "failure_behavior": "show_alternate_support_channel",
+  "telemetry_events": ["handoff_requested", "handoff_queued"],
+  "config": {"queue": "member-support"},
+  "workflow": {
+    "version": 1,
+    "steps": [
+      {
+        "op": "call_tool",
+        "tool": "mock_live_agent",
+        "action": "create",
+        "arguments": {
+          "reason": "$inputs.reason",
+          "active_goal": "$inputs.active_goal",
+          "completed_steps": "$inputs.completed_steps"
+        },
+        "save_as": "handoff",
+        "completed_step": "queued mock live-agent case"
+      },
+      {
+        "op": "respond",
+        "values": {
+          "queue": "$vars.handoff.queue",
+          "case_id": "$vars.handoff.case_id"
+        },
+        "outcome": {
+          "status": "$vars.handoff.status",
+          "case_id": "$vars.handoff.case_id",
+          "queue": "$vars.handoff.queue",
+          "summary": "$vars.handoff.summary"
+        },
+        "completed_step": "returned minimized handoff context"
+      }
+    ]
+  }
+}
