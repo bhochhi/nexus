@@ -72,6 +72,10 @@ def test_openai_analysis_uses_responses_api_and_returns_skill_gap(runtime_factor
     assert request["reasoning"] == {"effort": "low"}
     assert request["text"] == {"format": {"type": "json_object"}}
     assert request["store"] is False
+    assert "json" in request["input"].lower()
+    assert json.loads(request["input"])["output_requirement"] == (
+        "Return valid JSON only."
+    )
     assert "temperature" not in request
     assert "messages" not in request
     metadata = provider.observability_metadata()

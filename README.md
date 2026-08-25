@@ -124,6 +124,48 @@ The runtime emits one trace for each member turn, with nested observations for s
 
 Console tracing is enabled by default. Interactive runs use compact, color-coded output for the important LLM, policy, skill, tool, and turn observations. It records decision evidence such as goal candidates and confidence, selected skill and version, risk tier, policy result, model/provider and fallback status, tool outcome, latency, and OpenAI token usage when available. It does not record hidden model reasoning. Set `TRACE_CONSOLE_FORMAT=json` or pass `--trace-format json` when machine-readable JSON lines are needed; `--log-level DEBUG` also displays lower-level graph and state spans in pretty mode.
 
+### How to read the CLI trace
+
+Read the compact output from top to bottom as the path taken for one member
+utterance. A green check means that stage completed; a red `x` means that stage
+raised an error. The time at the right is that stage's elapsed time in
+milliseconds.
+
+| Output | Meaning |
+| --- | --- |
+| `HTTP Request ... 200 OK` | OpenAI SDK HTTP logging. It confirms that OpenAI accepted the request; it is not a Langfuse export message. |
+| `LLM llm.goal_detection` | The model analyzed the utterance for supported goals, extracted inputs, ambiguity, or a skill gap. It did not execute the goal. |
+| `POLICY policy.evaluate` | Deterministic authentication, authorization, risk, and confirmation controls evaluated the selected skill. |
+| `TOOL tool.<name>` | A typed integration was called. Every integration in this POC is mock/local even when its name describes accounts, transfers, or a live agent. |
+| `SKILL skill.<name>` | The declarative skill workflow completed its current pass. It may have asked for missing input, paused for confirmation, or produced an outcome. |
+| `TURN member-assistant.turn` | The root observation summarizing the complete member turn, including model, policy, tools, skill execution, state persistence, and reply. |
+| `assistant>` | The member-facing reply. |
+| `model(last call)>` | A concise verification of which configured provider/model actually handled the most recent model operation. |
+
+Common metadata fields are:
+
+| Field | Meaning |
+| --- | --- |
+| `provider=openai` / `model=gpt-5.6-luna` | The active provider adapter and exact model ID. |
+| `endpoint=responses` | The OpenAI Responses API handled the model call. |
+| `reasoning=low` | Configured reasoning effort. This is a setting, not hidden reasoning text; chain-of-thought is not logged. |
+| `fallback=no` | The configured provider succeeded. `fallback=yes` means the deterministic availability provider handled that operation. |
+| `in_tokens` / `out_tokens` | Tokens sent to and returned by the model for this call. |
+| `skill` | The catalog skill selected for policy or execution. |
+| `risk_tier` | Governance category: `informational`, `navigation`, `read_only`, `consequential`, or `handoff`. It controls policy handling; it is not a model confidence score. |
+| `decision=policy_approved` | Deterministic policy allowed the skill to proceed. |
+| `confirmation` | Whether a consequential action is waiting for, has received, or does not require confirmation at this stage. |
+| `outcome=queued` | The mock workflow's terminal status. For handoff, `queued` means a synthetic support case was created. |
+| `goal_clarification` | Whether the runtime is waiting for the member to choose between plausible goals. |
+| `handoff_offer` | Whether a proactive frustration/no-progress handoff offer is waiting for yes/no. It remains `no` for a direct member-requested handoff. |
+| `no_goal_turns` | Consecutive turns that did not produce a supported goal; a successful goal resets it to zero. |
+
+For the sample handoff trace, the sequence is: Luna recognized a direct live-agent
+goal, deterministic policy approved the governed handoff skill, the mock live-agent
+tool created a synthetic case, the skill reported `queued`, and the complete turn
+took about 1.16 seconds. `handoff_offer=no` means this was not a pending proactive
+offer—it was already processed as a direct request.
+
 Use CLI overrides when testing:
 
 ```bash
@@ -168,6 +210,27 @@ Generate a trace and then open the `Agentic Member Assistant POC` project:
 ```bash
 member-assistant --provider mock --trace both --session tracing-demo
 ```
+
+For normal OpenAI testing, either set `TRACE_BACKENDS=console,langfuse` or pass
+`--trace both`. Restart the CLI after changing an environment file, then enter
+`/trace`; its `backends` list must contain both `console` and `langfuse`. Exports
+are batched and normally appear shortly after a turn. With
+`TRACE_HASH_SESSION_ID=true`, Langfuse displays a value such as
+`sha256:3806594b03a90823` rather than the raw CLI `--session` value.
+
+If traces are absent, verify both the server and the configured exporter:
+
+```bash
+member-assistant-observability status
+member-assistant-observability doctor
+member-assistant --trace both --session tracing-check
+# In the CLI:
+/trace
+```
+
+`doctor` verifies server health, project-key authentication, and the latest
+ingested observation. Seeing console trace lines alone proves only that the
+console backend is active; it does not prove that Langfuse export is enabled.
 
 Try “Transfer $50 from checking to savings,” inspect the trace, then answer “yes” and compare the two turns in the same hashed Langfuse session. Stop the stack without deleting trace volumes using:
 

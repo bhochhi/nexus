@@ -141,6 +141,7 @@ class OpenAIProvider(ModelProvider):
                 instructions=instruction,
                 input=json.dumps(
                     {
+                        "output_requirement": "Return valid JSON only.",
                         "skills": choices,
                         "member_message": message,
                         "conversation_context": dict(context or {}),
