@@ -7,7 +7,7 @@ A small, runnable financial-services member-assistance proof of concept built wi
 - A fixed LangGraph lifecycle for state-aware goal understanding, safe ordering, durable goal/slot clarification, policy checks, generic skill execution, interruption, resumption, confirmation, and confirmed handoff.
 - A provider-neutral `ModelProvider` interface. `MODEL_PROVIDER=openai` and `MODEL_ID=gpt-5.6-luna` are the demo defaults; OpenAI Responses API code is isolated in one adapter. A deterministic provider supports offline demos and tests and is the availability fallback by default.
 - A versioned file catalog that polls a lightweight active routing index. New immutable skill artifacts activate without process restart or graph recompilation; invalid index updates retain the last-known-good catalog.
-- One business-facing `SKILL.md` format that compiles to an internal JSON artifact, plus a safe declarative workflow interpreter shared by built-in and custom authoring archetypes.
+- One portable, business-facing `SKILL.md` artifact format plus a safe declarative workflow interpreter shared by built-in and custom authoring archetypes. There is no parallel JSON skill representation.
 - Approved-knowledge, guided-balance, deterministic internal-transfer, and live-agent skills active at startup. Online-ID recovery is packaged separately for live installation.
 - SQLite conversation snapshots and privacy-safe audit events.
 - Provider-neutral structured tracing with console, in-memory test, and local Langfuse/OpenTelemetry sinks. Content is redacted and session identifiers are hashed by default.
@@ -258,6 +258,7 @@ member> I forgot my online ID
 assistant> Use the approved online-ID recovery page ... Would you like to resume ...?
 member> resume
 member> checking
+member> /remove-online-id
 ```
 
 `/add-online-id` compiles and publishes
@@ -268,28 +269,38 @@ tasks use the newly active version; tasks already waiting for clarification,
 confirmation, or resume remain pinned to their original version and content
 hash.
 
+`/remove-online-id` deactivates it for new goals without deleting the immutable
+artifact. A paused task that already references that version can still resume.
+Every publish, activate, rollback, and deactivate operation appends an actor,
+timestamp, version, hash, and catalog revision to the local
+`skills/catalog/catalog-events.yaml` audit stream.
+
 ## Add a skill
 
 Business authors create one `SKILL.md` with structured YAML frontmatter and a
 readable Markdown body. It declares ownership, semantic version, goals, inputs,
 behavior dimensions, governance, approved tools, response design, optional
-workflow, and acceptance scenarios. JSON under `_registry/artifacts` is a
-compiled runtime artifact and should not be hand-authored.
+workflow, and acceptance scenarios. Publication stores that same source as
+`skills/catalog/<name>/<version>/SKILL.md`; `active.yaml` contains only routing
+metadata and active-version pointers.
 
 ```bash
 member-assistant-skills validate skills/available/online_id/SKILL.md
 member-assistant-skills publish skills/available/online_id/SKILL.md
 member-assistant-skills active
 member-assistant-skills versions --name online_id_recovery
+member-assistant-skills deactivate online_id_recovery
 ```
 
 Built-in archetypes are authoring presets, not a closed list of business
 capabilities. A custom archetype works without new Python when it compiles to
 the allowlisted operations: `collect`, `call_tool`, `select`, `validate`,
-`validate_decimal`, `set`, `confirm`, and `respond`. Simple static-response and
-navigation skills receive an implicit workflow. If a referenced tool or action
-does not exist, publication fails; adding that tool adapter is the intended
-platform-code extension.
+`validate_decimal`, `set`, `confirm`, and `respond`. Static response,
+tool-backed response, guided selection, and navigation recipes receive a
+synthesized workflow. Explicit workflows are reserved for capabilities that
+need deterministic sequencing. If a referenced tool or action does not exist,
+publication fails; adding that tool adapter is the intended platform-code
+extension.
 
 Different content cannot overwrite an existing name/version. Increment the
 semantic version, publish it, and use `member-assistant-skills activate` to move
@@ -314,14 +325,14 @@ src/member_assistant/
   runtime.py, models.py       stable graph and explicit conversation/task state
   catalog.py                  metadata-first discovery, lazy artifacts, watcher
   skill_authoring.py          SKILL.md compiler, acceptance gates, publisher
-  skill_cli.py                validate, publish, inspect, activate/rollback
+  skill_cli.py                validate, publish, inspect, activate/deactivate
   state_store.py, policy.py   SQLite durability/audit and deterministic controls
   observability.py            console/memory tracing and Langfuse OTLP exporter
   providers/                  provider-neutral contract, OpenAI, offline provider
   skills/                     one validated declarative workflow interpreter
   tools/                      typed mock adapters and generic tool registry
   cli.py                      local chat demo
-skills/catalog/               startup definitions and generated version registry
+skills/catalog/               active.yaml plus immutable versioned SKILL.md artifacts
 skills/available/             business-authored candidate SKILL.md files
 data/knowledge.json           approved mock FAQ content
 tests/                        automated acceptance scenarios
@@ -333,7 +344,7 @@ observability/                local Langfuse v4 Docker Compose stack
 - Keyword routing and catalog-defined extraction rules are the deterministic fallback and test double; they are deliberately transparent rather than a production NLU system.
 - The declarative operation set is intentionally small. A novel integration requires a tool adapter; a novel reusable control may require a new platform operation, but never a capability-specific executor.
 - The file publisher and polling watcher model a control plane locally; production needs authenticated approval, artifact signing/provenance, durable object storage, event-driven fleet rollout, compatibility gates, and retained versions for in-flight work.
-- Root-level JSON catalog files remain supported for the original POC examples while they are migrated; new business-authored capabilities should use `SKILL.md` and the versioned registry.
+- Every capability uses the same `SKILL.md` contract. The catalog has no legacy JSON loader or capability-specific Python executor.
 - SQLite stores one local process's state; production would use encrypted shared storage, retention controls, and LangGraph-compatible distributed checkpoints.
 - Authentication and authorizations are synthetic session flags. URLs, balances, transfer receipts, and handoff cases are mock values only.
 - Policy/audit coverage demonstrates control boundaries but does not claim production compliance, fraud controls, or regulated-advice support.

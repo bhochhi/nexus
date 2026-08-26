@@ -1,0 +1,151 @@
+apiVersion: nexus.catalog/v1
+revision: 1
+skills:
+  approved_knowledge:
+    version: 2.0.0
+    artifact_hash: 03a970d3ca5a632705d758ff961ebae2ef0a7451573804ae27dab2ca8b6edb17
+    artifact: approved_knowledge/2.0.0/SKILL.md
+    routing:
+      name: approved_knowledge
+      version: 2.0.0
+      artifact_hash: 03a970d3ca5a632705d758ff961ebae2ef0a7451573804ae27dab2ca8b6edb17
+      archetype: knowledge
+      description: Answers banking and insurance FAQs from approved local knowledge.
+      owner: Member Knowledge Product
+      risk_tier: informational
+      interaction: direct
+      execution: knowledge_retrieval
+      lifecycle: synchronous
+      supported_goals:
+        - name: answer_approved_faq
+          display_name: ask an account-policy question
+          keywords: [overdraft, coverage, deposit insurance, insured, insurance]
+          examples:
+            - How does overdraft protection work?
+            - Are my deposits insured?
+      input_schema:
+        type: object
+        required: [query]
+        properties:
+          query:
+            type: string
+            minLength: 2
+      input_extraction:
+        query:
+          strategy: full_message
+  guided_balance:
+    version: 2.0.0
+    artifact_hash: 414991b5e1ab9fb8285b3d4f0987bfd7caac143116b27990742e1c7c38617c39
+    artifact: guided_balance/2.0.0/SKILL.md
+    routing:
+      name: guided_balance
+      version: 2.0.0
+      artifact_hash: 414991b5e1ab9fb8285b3d4f0987bfd7caac143116b27990742e1c7c38617c39
+      archetype: guided_resolution
+      description: Retrieves authorized mock account balances with guided account selection.
+      owner: Deposit Servicing
+      risk_tier: read_only
+      interaction: guided
+      execution: tool_query
+      lifecycle: synchronous
+      supported_goals:
+        - name: check_account_balance
+          display_name: check an account balance
+          keywords: [balance, how much money, available funds]
+          examples:
+            - What is my balance?
+            - How much is in checking?
+      input_schema:
+        type: object
+        properties:
+          account:
+            type: string
+      input_extraction:
+        account:
+          strategy: alias
+          aliases:
+            checking: checking
+            savings: savings
+            chk-001: chk-001
+            sav-001: sav-001
+            "1001": "1001"
+            "2002": "2002"
+  internal_transfer:
+    version: 2.0.0
+    artifact_hash: 79dce9215262a4a9b69f17181c435793e71cdeca907a65f2665958c846edae51
+    artifact: internal_transfer/2.0.0/SKILL.md
+    routing:
+      name: internal_transfer
+      version: 2.0.0
+      artifact_hash: 79dce9215262a4a9b69f17181c435793e71cdeca907a65f2665958c846edae51
+      archetype: deterministic_workflow
+      description: Collects, validates, reviews, confirms, and submits one mock internal transfer.
+      owner: Money Movement
+      risk_tier: consequential
+      interaction: guided
+      execution: workflow
+      lifecycle: synchronous
+      supported_goals:
+        - name: make_internal_transfer
+          display_name: make an internal transfer
+          keywords: [transfer, move money, send money between]
+          examples:
+            - Transfer $50 from checking to savings.
+      input_schema:
+        type: object
+        required: [source_account, destination_account, amount]
+        properties:
+          source_account:
+            type: string
+          destination_account:
+            type: string
+          amount:
+            type: string
+            pattern: '^[0-9]+(\.[0-9]{1,2})?$'
+      input_extraction:
+        amount:
+          strategy: regex
+          pattern: '(?:\$\s*|\b)(\d+(?:\.\d{1,2})?)\b'
+          group: 1
+        source_account:
+          strategy: regex
+          pattern: '\bfrom\s+([a-z0-9-]+)(?:\s+account)?\s+to\s+([a-z0-9-]+)'
+          group: 1
+        destination_account:
+          strategy: regex
+          pattern: '\bfrom\s+([a-z0-9-]+)(?:\s+account)?\s+to\s+([a-z0-9-]+)'
+          group: 2
+  live_agent_handoff:
+    version: 2.0.0
+    artifact_hash: d47a220466338a6c7a3c3b557d9f0d16aa38839d2ea59085ff114136ea08ab5c
+    artifact: live_agent_handoff/2.0.0/SKILL.md
+    routing:
+      name: live_agent_handoff
+      version: 2.0.0
+      artifact_hash: d47a220466338a6c7a3c3b557d9f0d16aa38839d2ea59085ff114136ea08ab5c
+      archetype: human_handoff
+      description: Creates a mock live-agent case with minimized context.
+      owner: Contact Center Operations
+      risk_tier: handoff
+      interaction: guided
+      execution: handoff
+      lifecycle: synchronous
+      supported_goals:
+        - name: request_live_agent
+          display_name: speak with a live agent
+          keywords: [live agent, human, person, representative, talk to someone]
+          examples:
+            - Get me a person.
+            - I want a live agent.
+      input_schema:
+        type: object
+        properties:
+          reason:
+            type: string
+          active_goal:
+            type: string
+          completed_steps:
+            type: array
+            items:
+              type: string
+      input_extraction: {}

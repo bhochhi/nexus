@@ -2,6 +2,7 @@ from pathlib import Path
 from textwrap import dedent
 
 import pytest
+import yaml
 
 from member_assistant.catalog import CatalogValidationError, SkillCatalog
 from member_assistant.config import PROJECT_ROOT
@@ -13,7 +14,23 @@ ONLINE_ID = (
 )
 
 
+def test_every_catalog_capability_is_a_versioned_skill_markdown():
+    catalog = PROJECT_ROOT / "skills" / "catalog"
+    artifacts = sorted(catalog.glob("*/*/SKILL.md"))
+
+    assert len(artifacts) == 4
+    assert not list(catalog.rglob("*.json"))
+    assert (catalog / "active.yaml").is_file()
+    loaded = SkillCatalog(catalog)
+    assert all(
+        loaded.get(route.name, route.version, route.artifact_hash) is not None
+        for route in loaded.routes()
+    )
+    assert loaded.errors == {}
+
+
 def _guided_source(path: Path, version: str, label: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         dedent(
             """\
@@ -179,6 +196,18 @@ def test_publication_is_immutable_idempotent_and_rollbackable(tmp_path):
         "3.1.0",
     }
     assert next_receipt.artifact_hash != first.artifact_hash
+    events = list(
+        yaml.safe_load_all(
+            (tmp_path / "catalog" / "catalog-events.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+    )
+    assert {event["action"] for event in events} >= {
+        "publish_and_activate",
+        "activate",
+    }
+    assert all(event["artifact_hash"] for event in events)
 
 
 def test_catalog_loads_routing_metadata_before_full_artifact(tmp_path):
@@ -202,8 +231,8 @@ def test_paused_task_resumes_with_pinned_version_after_publish_and_restart(
     first_runtime = runtime_factory(
         db_name="version-pin.db", catalog_dir=catalog_dir
     )
-    v1 = _guided_source(tmp_path / "v1.md", "1.0.0", "V1")
-    v2 = _guided_source(tmp_path / "v2.md", "2.0.0", "V2")
+    v1 = _guided_source(tmp_path / "v1" / "SKILL.md", "1.0.0", "V1")
+    v2 = _guided_source(tmp_path / "v2" / "SKILL.md", "2.0.0", "V2")
     first_runtime.catalog.install(v1, first_runtime.tools.contracts())
 
     prompt = first_runtime.chat("pinned", "start advisory")
@@ -229,6 +258,36 @@ def test_paused_task_resumes_with_pinned_version_after_publish_and_restart(
         if item.name == "configurable_advisory"
     )
     assert route.version == "2.0.0"
+
+
+def test_deactivation_stops_new_routing_but_preserves_inflight_version(
+    runtime_factory, tmp_path
+):
+    catalog_dir = tmp_path / "catalog"
+    first_runtime = runtime_factory(
+        db_name="deactivate.db", catalog_dir=catalog_dir
+    )
+    source = _guided_source(
+        tmp_path / "deactivate-source" / "SKILL.md", "1.0.0", "Pinned"
+    )
+    first_runtime.catalog.install(source, first_runtime.tools.contracts())
+    prompt = first_runtime.chat("inflight", "start advisory")
+    assert "Pinned question" in prompt.text
+
+    assert first_runtime.catalog.deactivate("configurable_advisory") is True
+    first_runtime.close()
+    second_runtime = runtime_factory(
+        db_name="deactivate.db", catalog_dir=catalog_dir
+    )
+
+    resumed = second_runtime.chat("inflight", "blue")
+    unavailable = second_runtime.chat("new-after-deactivate", "start advisory")
+
+    assert "Pinned saved blue" in resumed.text
+    assert unavailable.selected_skill is None
+    assert "configurable_advisory" not in {
+        route.name for route in second_runtime.catalog.routes()
+    }
 
 
 def test_publication_rejects_a_missing_tool_dependency(tmp_path):

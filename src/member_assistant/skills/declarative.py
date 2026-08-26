@@ -4,14 +4,14 @@ from decimal import Decimal, InvalidOperation
 import re
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
-from member_assistant.catalog import SKILL_TYPES
+from member_assistant.catalog import BUILTIN_ARCHETYPES
 from .base import SkillContext, SkillExecutor, SkillResult
 
 
 class DeclarativeSkillExecutor(SkillExecutor):
     """Executes only the small, validated operation set defined by the platform."""
 
-    skill_types = tuple(sorted(SKILL_TYPES))
+    archetypes = tuple(sorted(BUILTIN_ARCHETYPES))
 
     def execute(self, task: Dict[str, Any], context: SkillContext) -> SkillResult:
         steps = context.definition.workflow["steps"]

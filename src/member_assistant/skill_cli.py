@@ -50,6 +50,11 @@ def _parser() -> argparse.ArgumentParser:
     activate.add_argument("name")
     activate.add_argument("version")
     activate.add_argument("artifact_hash")
+
+    deactivate = subparsers.add_parser(
+        "deactivate", help="stop routing new work without deleting version history"
+    )
+    deactivate.add_argument("name")
     return parser
 
 
@@ -81,7 +86,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "name": compiled.definition.name,
                 "version": compiled.definition.version,
                 "artifact_hash": compiled.definition.artifact_hash,
-                "archetype": compiled.definition.skill_type,
+                "archetype": compiled.definition.archetype,
                 "behavior": {
                     "interaction": compiled.definition.interaction,
                     "execution": compiled.definition.execution,
@@ -103,10 +108,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             }
         elif args.command == "versions":
             output = {"versions": publisher.list_versions(args.name)}
-        else:
+        elif args.command == "activate":
             output = _receipt(
                 publisher.activate(args.name, args.version, args.artifact_hash)
             )
+        else:
+            receipt = publisher.deactivate(args.name)
+            output = {
+                "name": receipt.name,
+                "version": receipt.version,
+                "artifact_hash": receipt.artifact_hash,
+                "deactivated": receipt.deactivated,
+            }
     except (CatalogValidationError, OSError, ValueError, json.JSONDecodeError) as exc:
         print(json.dumps({"valid": False, "error": str(exc)}, indent=2))
         return 2

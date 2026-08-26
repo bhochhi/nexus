@@ -69,3 +69,12 @@ def test_skill_cli_validates_publishes_and_lists_active_catalog(tmp_path, capsys
     assert skill_main(["--catalog", str(catalog), "active"]) == 0
     active = json.loads(capsys.readouterr().out)
     assert active["skills"][0]["name"] == "online_id_recovery"
+
+    assert skill_main(
+        ["--catalog", str(catalog), "deactivate", "online_id_recovery"]
+    ) == 0
+    deactivated = json.loads(capsys.readouterr().out)
+    assert deactivated["deactivated"] is True
+
+    assert skill_main(["--catalog", str(catalog), "active"]) == 0
+    assert json.loads(capsys.readouterr().out)["skills"] == []

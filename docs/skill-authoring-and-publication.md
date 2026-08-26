@@ -1,8 +1,8 @@
 # Nexus Skill v1: authoring and publication
 
 This POC treats a skill as a business-owned, versioned capability while keeping
-the LangGraph runtime stable. Business authors work with one `SKILL.md`; compiled
-JSON is an internal runtime artifact, not the authoring format.
+the LangGraph runtime stable. Business authors and the runtime share one
+portable `SKILL.md` artifact; there is no second JSON skill representation.
 
 ## Publication and call flow
 
@@ -10,11 +10,11 @@ JSON is an internal runtime artifact, not the authoring format.
 authoring tool / Git
         |
         v
-     SKILL.md
+ candidate SKILL.md
         |
         | validate schema, acceptance, governance, tool dependencies
         v
- immutable versioned artifact ------> active routing index
+ immutable versioned SKILL.md ------> active.yaml routing index
                                            |
                               catalog poll / future event
                                            |
@@ -26,11 +26,13 @@ member utterance -> routing metadata -> exact artifact -> generic executor
 
 1. `SKILL.md` contains YAML frontmatter for machine-readable behavior and a
    Markdown body for business documentation.
-2. The compiler normalizes it to the small governed workflow contract.
+2. The compiler normalizes it in memory to the small governed workflow
+   contract. The authored source remains the immutable artifact.
 3. Publication validates structure, deterministic acceptance routing, expected
    outcomes, confirmation rules, and installed tool/action dependencies.
-4. The artifact is stored by skill name, semantic version, and SHA-256 content
-   hash. Different content cannot overwrite the same version.
+4. The artifact is stored as `<name>/<version>/SKILL.md`; its SHA-256 content
+   hash is recorded in the active index. Different content cannot overwrite the
+   same name/version.
 5. One small active index contains only routing metadata and the selected
    artifact reference. Updating this file is atomic.
 6. Running assistants poll the index and route new work to the new version
@@ -38,11 +40,15 @@ member utterance -> routing metadata -> exact artifact -> generic executor
 7. The full artifact is loaded only after goal selection. A durable task pins
    its original version and hash, so a clarification, pause, restart, or resume
    cannot silently switch workflow behavior.
+8. Publication, activation, rollback, and deactivation append timestamped,
+   actor-attributed events containing the exact version, hash, and catalog
+   revision to `catalog-events.yaml`.
 
-For this local POC the artifact store and index are files under
-`skills/catalog/_registry/`. A production catalog would put the same contracts
-behind an authenticated publication API and durable object store, then notify
-runtimes through an event or cache-invalidation channel.
+For this local POC the artifact store is `skills/catalog/<name>/<version>/` and
+the routing index is `skills/catalog/active.yaml`. A production catalog would
+put the same artifacts and pointers behind an authenticated publication API and
+durable object store, then notify runtimes through an event or
+cache-invalidation channel.
 
 ## One authoring file, not four required files
 
@@ -64,11 +70,11 @@ The Markdown body explains purpose, policy, and examples in business language.
 Acceptance scenarios live in the same file for the POC; a future authoring tool
 can render them as form fields instead of exposing YAML.
 
-Simple skills do not need authors to write a workflow. `static_response`
-compiles to a safe response step, and `navigation` compiles to an approved tool
-call followed by a response. Guided or deterministic journeys can supply the
-workflow inline. More reusable templates can be added to the compiler later
-without changing the catalog or runtime contract.
+Simple skills do not need authors to write a workflow. `static_response`,
+`tool_response`, `guided_selection`, and `navigation` recipes compile to the
+safe shared operation set. Only a journey needing precise ordered controls—such
+as internal transfer—authors a workflow inline. More reusable recipes can be
+added to the compiler without changing the catalog or runtime contract.
 
 See `skills/available/online_id/SKILL.md` for the navigation example.
 
@@ -128,6 +134,13 @@ Activate a prior version (rollback) using values returned by `versions`:
 
 ```bash
 member-assistant-skills activate online_id_recovery 3.0.0 <artifact-hash>
+```
+
+Deactivate new routing while retaining immutable versions for audit and
+in-flight tasks:
+
+```bash
+member-assistant-skills deactivate online_id_recovery
 ```
 
 Use `--catalog PATH` before the subcommand to target a different registry. All

@@ -719,7 +719,7 @@ class AgentRuntime:
                 "response_parts": ["There is no active task awaiting information."],
             }
         definition = self._task_definition(task)
-        executor = self.executors.get(definition.skill_type) if definition else None
+        executor = self.executors.get(definition.archetype) if definition else None
         if not definition or not executor:
             task["status"] = "failed"
             return {
@@ -829,7 +829,7 @@ class AgentRuntime:
         if not task:
             return {"conversation": conversation, "next_action": "finalize"}
         definition = self._task_definition(task)
-        executor = self.executors.get(definition.skill_type) if definition else None
+        executor = self.executors.get(definition.archetype) if definition else None
         if not definition or not executor:
             task["status"] = "failed"
             conversation["outcome"] = {"status": "skill_unavailable"}
@@ -908,7 +908,7 @@ class AgentRuntime:
         if task is None:
             return {"conversation": conversation}
         definition = self._task_definition(task)
-        executor = self.executors.get(definition.skill_type) if definition else None
+        executor = self.executors.get(definition.archetype) if definition else None
         if not definition or not executor:
             task["status"] = "failed"
             conversation["outcome"] = {"status": "skill_unavailable"}
@@ -927,7 +927,7 @@ class AgentRuntime:
                     "skill": definition.name,
                     "skill_version": definition.version,
                     "skill_artifact_hash": definition.artifact_hash,
-                    "skill_type": definition.skill_type,
+                    "archetype": definition.archetype,
                     "risk_tier": definition.risk_tier,
                     "goal": task["goal"],
                     "task_id": task["id"],
@@ -1549,24 +1549,16 @@ class AgentRuntime:
     def _task_definition(self, task: TaskState) -> Optional[SkillDefinition]:
         """Resolve the immutable artifact originally selected for a durable task.
 
-        Older persisted POC sessions do not contain an artifact hash, so they fall
-        back to an exact version (when unambiguous) and finally the active version.
-        New tasks always store the content hash and cannot silently change behavior
-        when a newer skill is published.
+        Every task stores the version and content hash. Missing identity fails
+        closed; the runtime never substitutes whatever version happens to be active.
         """
 
         name = task["skill_name"]
         version = task.get("skill_version")
         artifact_hash = task.get("skill_artifact_hash")
         if version and artifact_hash:
-            # Never substitute a different artifact for a hash-pinned task. If
-            # retention is broken, fail closed instead of changing behavior.
             return self.catalog.get(name, version, artifact_hash)
-        if version:
-            definition = self.catalog.get(name, version=version)
-            if definition is not None:
-                return definition
-        return self.catalog.get(name)
+        return None
 
     @staticmethod
     def _is_affirmative(message: str, resume_words: bool = False) -> bool:

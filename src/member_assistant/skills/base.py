@@ -37,7 +37,7 @@ class SkillResult:
 
 
 class SkillExecutor(ABC):
-    skill_types: Tuple[str, ...] = ()
+    archetypes: Tuple[str, ...] = ()
 
     def required_tools(self, definition: SkillDefinition) -> Tuple[str, ...]:
         return tuple(

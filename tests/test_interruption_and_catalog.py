@@ -1,4 +1,3 @@
-import json
 import time
 
 from member_assistant.config import PROJECT_ROOT
@@ -60,22 +59,24 @@ def test_invalid_hot_edit_retains_last_valid_skill(runtime_factory):
     valid = runtime.catalog.get("online_id_recovery")
     assert valid is not None
 
-    index = runtime.catalog.directory / "_registry" / "active.json"
-    index.write_text("{not valid json", encoding="utf-8")
+    index = runtime.catalog.directory / "active.yaml"
+    index.write_text("skills: [not a valid catalog", encoding="utf-8")
     runtime.catalog.refresh(force=True)
 
     retained = runtime.catalog.get("online_id_recovery")
     assert retained == valid
-    assert "_registry/active.json" in runtime.catalog.errors
+    assert "active.yaml" in runtime.catalog.errors
 
 
-def test_new_invalid_file_does_not_replace_catalog(runtime_factory):
+def test_unpublished_skill_file_does_not_change_active_catalog(runtime_factory):
     runtime = runtime_factory()
     before = {skill.name for skill in runtime.catalog.list()}
-    bad = runtime.catalog.directory / "bad.json"
-    bad.write_text(json.dumps({"name": "incomplete"}), encoding="utf-8")
+    draft_directory = runtime.catalog.directory / "unpublished" / "1.0.0"
+    draft_directory.mkdir(parents=True)
+    draft = draft_directory / "SKILL.md"
+    draft.write_text("not a valid skill", encoding="utf-8")
 
     runtime.catalog.refresh(force=True)
 
     assert {skill.name for skill in runtime.catalog.list()} == before
-    assert "bad.json" in runtime.catalog.errors
+    assert "unpublished" not in {skill.name for skill in runtime.catalog.routes()}

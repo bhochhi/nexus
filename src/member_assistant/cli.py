@@ -156,7 +156,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             else "{:g} minutes".format(ttl / 60.0)
         )
     )
-    print("Commands: /skills, /state, /trace, /add-online-id, /quit")
+    print(
+        "Commands: /skills, /state, /trace, /add-online-id, "
+        "/remove-online-id, /quit"
+    )
     try:
         while True:
             try:
@@ -195,6 +198,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         target.name, runtime.catalog.revision
                     )
                 )
+                continue
+            if message == "/remove-online-id":
+                if any(
+                    route.name == "online_id_recovery"
+                    for route in runtime.catalog.routes()
+                ):
+                    runtime.catalog.deactivate("online_id_recovery")
+                    response = (
+                        "Deactivated online-ID recovery for new requests; its immutable "
+                        "version history was retained."
+                    )
+                else:
+                    response = "Online-ID recovery is already inactive."
+                print(_color("assistant>", "1;32", color_enabled) + " " + response)
                 continue
             try:
                 reply = runtime.chat(args.session, message)

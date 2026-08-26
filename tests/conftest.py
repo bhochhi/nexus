@@ -23,9 +23,12 @@ def runtime_factory(tmp_path):
     ):
         active = catalog_dir or tmp_path / "catalog"
         active.mkdir(exist_ok=True)
-        if not list(active.glob("*.json")):
-            for source in (PROJECT_ROOT / "skills" / "catalog").glob("*.json"):
-                shutil.copy2(source, active / source.name)
+        if not (active / "active.yaml").exists():
+            shutil.copytree(
+                PROJECT_ROOT / "skills" / "catalog",
+                active,
+                dirs_exist_ok=True,
+            )
         catalog = SkillCatalog(active, poll_seconds=0.02)
         store = SQLiteConversationStore(tmp_path / db_name)
         mock_tools = tools or MockTools.create(PROJECT_ROOT / "data" / "knowledge.json")

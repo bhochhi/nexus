@@ -2,7 +2,7 @@
 
 from contextlib import contextmanager
 from dataclasses import dataclass
-import json
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 import re
@@ -33,10 +33,6 @@ class CompiledSkill:
     def routing(self) -> SkillRoutingDefinition:
         return self.definition.routing_definition()
 
-    def artifact_payload(self) -> Dict[str, Any]:
-        return dict(self.definition_payload)
-
-
 @dataclass(frozen=True)
 class PublicationReceipt:
     name: str
@@ -45,6 +41,14 @@ class PublicationReceipt:
     artifact_path: Path
     activated: bool
     idempotent: bool
+
+
+@dataclass(frozen=True)
+class DeactivationReceipt:
+    name: str
+    version: str
+    artifact_hash: str
+    deactivated: bool
 
 
 class SkillMarkdownCompiler:
@@ -95,7 +99,12 @@ class SkillMarkdownCompiler:
             raise CatalogValidationError(
                 "{}: YAML frontmatter is not closed".format(source.name)
             ) from exc
-        parsed = yaml.safe_load("\n".join(lines[1:closing])) or {}
+        try:
+            parsed = yaml.safe_load("\n".join(lines[1:closing])) or {}
+        except yaml.YAMLError as exc:
+            raise CatalogValidationError(
+                "{}: YAML frontmatter is invalid".format(source.name)
+            ) from exc
         if not isinstance(parsed, dict):
             raise CatalogValidationError(
                 "{}: YAML frontmatter must be an object".format(source.name)
@@ -123,18 +132,16 @@ class SkillMarkdownCompiler:
             frontmatter.get("implementation", {}), "implementation", source
         )
 
-        skill_type = str(
-            behavior.get("archetype", frontmatter.get("type", ""))
-        ).strip()
-        workflow = implementation.get("workflow") or frontmatter.get("workflow")
+        archetype = str(behavior.get("archetype", "")).strip()
+        workflow = implementation.get("workflow")
         if workflow is None:
-            workflow = self._yaml_section(body, "Workflow")
+            workflow = self._yaml_section(body, "Workflow", source)
         if workflow is None:
-            workflow = self._synthesize_workflow(skill_type, implementation, source)
+            workflow = self._synthesize_workflow(archetype, implementation, source)
 
         acceptance = frontmatter.get("acceptance")
         if acceptance is None:
-            acceptance = self._yaml_section(body, "Acceptance")
+            acceptance = self._yaml_section(body, "Acceptance", source)
         if isinstance(acceptance, dict):
             acceptance = acceptance.get("scenarios", [])
         if not isinstance(acceptance, list):
@@ -143,51 +150,30 @@ class SkillMarkdownCompiler:
             )
 
         input_contract = intent.get(
-            "input_schema", frontmatter.get("input_schema", {"type": "object", "properties": {}})
+            "input_schema", {"type": "object", "properties": {}}
         )
         payload: Dict[str, Any] = {
             "apiVersion": api_version,
-            "name": metadata.get("name", frontmatter.get("name")),
-            "version": metadata.get("version", frontmatter.get("version")),
-            "type": skill_type,
-            "description": intent.get("description", frontmatter.get("description", "")),
-            "owner": metadata.get("owner", frontmatter.get("owner", "")),
-            "risk_tier": governance.get(
-                "risk_tier", frontmatter.get("risk_tier", "informational")
-            ),
-            "supported_goals": intent.get(
-                "goals", frontmatter.get("supported_goals", [])
-            ),
+            "name": metadata.get("name"),
+            "version": metadata.get("version"),
+            "archetype": archetype,
+            "description": intent.get("description", ""),
+            "owner": metadata.get("owner", ""),
+            "risk_tier": governance.get("risk_tier", "informational"),
+            "supported_goals": intent.get("goals", []),
             "input_schema": input_contract,
-            "input_extraction": intent.get(
-                "input_extraction", frontmatter.get("input_extraction", {})
-            ),
-            "allowed_tools": implementation.get(
-                "tools", frontmatter.get("allowed_tools", [])
-            ),
-            "response_template": implementation.get(
-                "response_template", frontmatter.get("response_template", "")
-            ),
-            "auth_required": bool(
-                governance.get("auth_required", frontmatter.get("auth_required", False))
-            ),
-            "required_authorization": governance.get(
-                "required_authorization", frontmatter.get("required_authorization")
-            ),
+            "input_extraction": intent.get("input_extraction", {}),
+            "allowed_tools": implementation.get("tools", []),
+            "response_template": implementation.get("response_template", ""),
+            "auth_required": bool(governance.get("auth_required", False)),
+            "required_authorization": governance.get("required_authorization"),
             "confirmation_required": bool(
-                governance.get(
-                    "confirmation_required",
-                    frontmatter.get("confirmation_required", False),
-                )
+                governance.get("confirmation_required", False)
             ),
-            "disclosure": governance.get("disclosure", frontmatter.get("disclosure")),
-            "failure_behavior": governance.get(
-                "failure_behavior", frontmatter.get("failure_behavior", "safe_reject")
-            ),
-            "telemetry_events": implementation.get(
-                "telemetry_events", frontmatter.get("telemetry_events", [])
-            ),
-            "config": implementation.get("config", frontmatter.get("config", {})),
+            "disclosure": governance.get("disclosure"),
+            "failure_behavior": governance.get("failure_behavior", "safe_reject"),
+            "telemetry_events": implementation.get("telemetry_events", []),
+            "config": implementation.get("config", {}),
             "behavior": {
                 key: behavior[key]
                 for key in ("interaction", "execution", "lifecycle")
@@ -198,7 +184,7 @@ class SkillMarkdownCompiler:
         return payload, acceptance
 
     def _synthesize_workflow(
-        self, skill_type: str, implementation: Mapping[str, Any], source: Path
+        self, archetype: str, implementation: Mapping[str, Any], source: Path
     ) -> Mapping[str, Any]:
         if implementation.get("static_response"):
             response = self._mapping(
@@ -215,7 +201,43 @@ class SkillMarkdownCompiler:
                     }
                 ],
             }
-        if skill_type == "navigation" and implementation.get("navigation"):
+        if implementation.get("tool_response"):
+            recipe = self._mapping(
+                implementation["tool_response"], "tool_response", source
+            )
+            call = self._mapping(recipe.get("call", {}), "tool_response.call", source)
+            response = self._mapping(
+                recipe.get("response", {}), "tool_response.response", source
+            )
+            return {
+                "version": 1,
+                "steps": [
+                    {**call, "op": "call_tool"},
+                    {**response, "op": "respond"},
+                ],
+            }
+        if implementation.get("guided_selection"):
+            recipe = self._mapping(
+                implementation["guided_selection"], "guided_selection", source
+            )
+            source_step = self._mapping(
+                recipe.get("source", {}), "guided_selection.source", source
+            )
+            selection = self._mapping(
+                recipe.get("selection", {}), "guided_selection.selection", source
+            )
+            response = self._mapping(
+                recipe.get("response", {}), "guided_selection.response", source
+            )
+            return {
+                "version": 1,
+                "steps": [
+                    {**source_step, "op": "call_tool"},
+                    {**selection, "op": "select"},
+                    {**response, "op": "respond"},
+                ],
+            }
+        if archetype == "navigation" and implementation.get("navigation"):
             navigation = self._mapping(
                 implementation["navigation"], "navigation", source
             )
@@ -242,17 +264,24 @@ class SkillMarkdownCompiler:
             }
         raise CatalogValidationError(
             "{}: {} requires a Workflow section or a supported implicit implementation"
-            .format(source.name, skill_type or "skill")
+            .format(source.name, archetype or "skill")
         )
 
     @staticmethod
-    def _yaml_section(body: str, heading: str) -> Optional[Any]:
+    def _yaml_section(body: str, heading: str, source: Path) -> Optional[Any]:
         pattern = re.compile(
             r"^##\s+{}\s*$\s*```ya?ml\s*(.*?)\s*```".format(re.escape(heading)),
             re.IGNORECASE | re.MULTILINE | re.DOTALL,
         )
         match = pattern.search(body)
-        return yaml.safe_load(match.group(1)) if match else None
+        if not match:
+            return None
+        try:
+            return yaml.safe_load(match.group(1))
+        except yaml.YAMLError as exc:
+            raise CatalogValidationError(
+                "{}: {} YAML section is invalid".format(source.name, heading)
+            ) from exc
 
     @staticmethod
     def _mapping(value: Any, name: str, source: Path) -> Mapping[str, Any]:
@@ -381,41 +410,28 @@ class SkillPublicationValidator:
 
 
 class FileSkillPublisher:
-    """Atomically publish immutable artifacts and move an active-version pointer."""
+    """Publish immutable SKILL.md artifacts and atomically move active pointers."""
 
     def __init__(self, catalog_directory: Path):
         self.catalog_directory = Path(catalog_directory)
-        self.registry_directory = self.catalog_directory / "_registry"
-        self.artifacts_directory = self.registry_directory / "artifacts"
-        self.index_path = self.registry_directory / "active.json"
-        self.lock_path = self.registry_directory / "publish.lock"
+        self.index_path = self.catalog_directory / "active.yaml"
+        self.audit_path = self.catalog_directory / "catalog-events.yaml"
+        self.lock_path = self.catalog_directory / ".publish.lock"
 
     def publish(self, compiled: CompiledSkill, activate: bool = True) -> PublicationReceipt:
         definition = compiled.definition
         artifact_hash = definition.artifact_hash
-        version_directory = (
-            self.artifacts_directory / definition.name / definition.version
-        )
-        artifact_path = version_directory / "{}.json".format(artifact_hash)
+        version_directory = self.catalog_directory / definition.name / definition.version
+        artifact_path = version_directory / "SKILL.md"
         with self._publication_lock():
             version_directory.mkdir(parents=True, exist_ok=True)
-            existing = list(version_directory.glob("*.json"))
-            conflicts = [path for path in existing if path.stem != artifact_hash]
-            if conflicts:
-                raise CatalogValidationError(
-                    "{} {} is immutable; publish a new version for changed content"
-                    .format(definition.name, definition.version)
-                )
             idempotent = artifact_path.exists()
             if idempotent:
                 try:
-                    existing_payload = json.loads(
-                        artifact_path.read_text(encoding="utf-8")
-                    )
-                    existing_definition = SkillDefinition.from_dict(
-                        existing_payload, artifact_path
-                    )
-                except (OSError, json.JSONDecodeError, CatalogValidationError) as exc:
+                    existing_definition = SkillMarkdownCompiler().compile(
+                        artifact_path
+                    ).definition
+                except (OSError, yaml.YAMLError, CatalogValidationError) as exc:
                     raise CatalogValidationError(
                         "Existing immutable artifact is unreadable or invalid"
                     ) from exc
@@ -425,23 +441,40 @@ class FileSkillPublisher:
                     or existing_definition.artifact_hash != artifact_hash
                 ):
                     raise CatalogValidationError(
-                        "Existing immutable artifact does not match its identity"
+                        "{} {} is immutable; publish a new version for changed content".format(
+                            definition.name, definition.version
+                        )
                     )
             else:
-                self._atomic_json(artifact_path, compiled.artifact_payload())
+                self._atomic_text(
+                    artifact_path, compiled.source.read_text(encoding="utf-8")
+                )
             if activate:
                 index = self._read_index()
                 entry = {
                     "version": definition.version,
                     "artifact_hash": artifact_hash,
-                    "artifact": str(artifact_path.relative_to(self.registry_directory)),
+                    "artifact": str(artifact_path.relative_to(self.catalog_directory)),
                     "routing": compiled.routing.as_dict(),
                 }
                 skills = index.setdefault("skills", {})
                 if skills.get(definition.name) != entry:
                     skills[definition.name] = entry
                     index["revision"] = int(index.get("revision", 0)) + 1
-                    self._atomic_json(self.index_path, index)
+                    self._atomic_yaml(self.index_path, index)
+            else:
+                index = self._read_index()
+            self._append_audit(
+                action="publish_and_activate" if activate else "publish_staged",
+                name=definition.name,
+                version=definition.version,
+                artifact_hash=artifact_hash,
+                catalog_revision=int(index.get("revision", 0)),
+                details={
+                    "idempotent": idempotent,
+                    "source": str(compiled.source),
+                },
+            )
         return PublicationReceipt(
             name=definition.name,
             version=definition.version,
@@ -452,13 +485,10 @@ class FileSkillPublisher:
         )
 
     def activate(self, name: str, version: str, artifact_hash: str) -> PublicationReceipt:
-        artifact_path = self.artifacts_directory / name / version / "{}.json".format(
-            artifact_hash
-        )
+        artifact_path = self.catalog_directory / name / version / "SKILL.md"
         if not artifact_path.is_file():
             raise CatalogValidationError("Published artifact does not exist")
-        payload = json.loads(artifact_path.read_text(encoding="utf-8"))
-        definition = SkillDefinition.from_dict(payload, artifact_path)
+        definition = SkillMarkdownCompiler().compile(artifact_path).definition
         if (
             definition.name != name
             or definition.version != version
@@ -472,11 +502,18 @@ class FileSkillPublisher:
             index.setdefault("skills", {})[name] = {
                 "version": version,
                 "artifact_hash": artifact_hash,
-                "artifact": str(artifact_path.relative_to(self.registry_directory)),
+                "artifact": str(artifact_path.relative_to(self.catalog_directory)),
                 "routing": definition.routing_definition().as_dict(),
             }
             index["revision"] = int(index.get("revision", 0)) + 1
-            self._atomic_json(self.index_path, index)
+            self._atomic_yaml(self.index_path, index)
+            self._append_audit(
+                action="activate",
+                name=name,
+                version=version,
+                artifact_hash=artifact_hash,
+                catalog_revision=int(index["revision"]),
+            )
         return PublicationReceipt(
             name=name,
             version=version,
@@ -486,27 +523,65 @@ class FileSkillPublisher:
             idempotent=True,
         )
 
+    def deactivate(self, name: str) -> DeactivationReceipt:
+        """Stop routing new work while retaining every immutable version."""
+
+        with self._publication_lock():
+            index = self._read_index()
+            skills = index.setdefault("skills", {})
+            entry = skills.get(name)
+            if not isinstance(entry, dict):
+                raise CatalogValidationError("Active skill does not exist: {}".format(name))
+            del skills[name]
+            index["revision"] = int(index.get("revision", 0)) + 1
+            self._atomic_yaml(self.index_path, index)
+            self._append_audit(
+                action="deactivate",
+                name=name,
+                version=str(entry["version"]),
+                artifact_hash=str(entry["artifact_hash"]),
+                catalog_revision=int(index["revision"]),
+            )
+        return DeactivationReceipt(
+            name=name,
+            version=str(entry["version"]),
+            artifact_hash=str(entry["artifact_hash"]),
+            deactivated=True,
+        )
+
     def list_versions(self, name: Optional[str] = None) -> List[Dict[str, str]]:
-        pattern = [name] if name else [path.name for path in self.artifacts_directory.glob("*")]
+        pattern = [name] if name else [
+            path.name
+            for path in self.catalog_directory.iterdir()
+            if path.is_dir() and not path.name.startswith(".")
+        ]
         versions: List[Dict[str, str]] = []
         for skill_name in sorted(pattern):
-            skill_directory = self.artifacts_directory / skill_name
+            skill_directory = self.catalog_directory / skill_name
             for version_directory in sorted(skill_directory.glob("*")):
-                for artifact in sorted(version_directory.glob("*.json")):
-                    versions.append(
-                        {
-                            "name": skill_name,
-                            "version": version_directory.name,
-                            "artifact_hash": artifact.stem,
-                            "artifact_path": str(artifact),
-                        }
-                    )
+                artifact = version_directory / "SKILL.md"
+                if not artifact.is_file():
+                    continue
+                definition = SkillMarkdownCompiler().compile(artifact).definition
+                versions.append(
+                    {
+                        "name": skill_name,
+                        "version": definition.version,
+                        "artifact_hash": definition.artifact_hash,
+                        "artifact_path": str(artifact),
+                    }
+                )
         return versions
 
     def _read_index(self) -> Dict[str, Any]:
         if not self.index_path.exists():
             return {"apiVersion": CATALOG_API_VERSION, "revision": 0, "skills": {}}
-        parsed = json.loads(self.index_path.read_text(encoding="utf-8"))
+        try:
+            parsed = yaml.safe_load(self.index_path.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError as exc:
+            raise CatalogValidationError("Catalog active.yaml is invalid") from exc
+        if not isinstance(parsed, dict):
+            raise CatalogValidationError("Catalog active.yaml must be an object")
         if parsed.get("apiVersion") != CATALOG_API_VERSION:
             raise CatalogValidationError("Unsupported catalog apiVersion")
         if not isinstance(parsed.get("skills"), dict):
@@ -515,7 +590,7 @@ class FileSkillPublisher:
 
     @contextmanager
     def _publication_lock(self) -> Iterator[None]:
-        self.registry_directory.mkdir(parents=True, exist_ok=True)
+        self.catalog_directory.mkdir(parents=True, exist_ok=True)
         handle = self.lock_path.open("a+", encoding="utf-8")
         try:
             try:
@@ -534,16 +609,56 @@ class FileSkillPublisher:
                 pass
             handle.close()
 
+    def _append_audit(
+        self,
+        *,
+        action: str,
+        name: str,
+        version: str,
+        artifact_hash: str,
+        catalog_revision: int,
+        details: Optional[Mapping[str, Any]] = None,
+    ) -> None:
+        event = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "actor": os.getenv("SKILL_PUBLISHER_ACTOR")
+            or os.getenv("USER")
+            or "local-publisher",
+            "action": action,
+            "skill": name,
+            "version": version,
+            "artifact_hash": artifact_hash,
+            "catalog_revision": catalog_revision,
+            "details": dict(details or {}),
+        }
+        self.catalog_directory.mkdir(parents=True, exist_ok=True)
+        with self.audit_path.open("a", encoding="utf-8") as handle:
+            handle.write("---\n")
+            handle.write(yaml.safe_dump(event, sort_keys=False, allow_unicode=True))
+            handle.flush()
+            os.fsync(handle.fileno())
+
     @staticmethod
-    def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
+    def _atomic_yaml(path: Path, value: Mapping[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(path.suffix + ".tmp-{}".format(os.getpid()))
-        temporary.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        temporary.write_text(
+            yaml.safe_dump(dict(value), sort_keys=False, allow_unicode=True),
+            encoding="utf-8",
+        )
+        os.replace(str(temporary), str(path))
+
+    @staticmethod
+    def _atomic_text(path: Path, value: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(path.suffix + ".tmp-{}".format(os.getpid()))
+        temporary.write_text(value, encoding="utf-8")
         os.replace(str(temporary), str(path))
 
 
 __all__ = [
     "CompiledSkill",
+    "DeactivationReceipt",
     "FileSkillPublisher",
     "PublicationReceipt",
     "SkillMarkdownCompiler",
