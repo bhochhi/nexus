@@ -53,6 +53,31 @@ def test_openai_responses_endpoint_and_reasoning_are_visible():
     assert "reasoning=low" in line
 
 
+def test_bedrock_converse_region_and_guardrail_are_visible():
+    provider = SimpleNamespace(
+        name="bedrock",
+        model_id="us.openai.gpt-5.6-terra",
+        observability_metadata=lambda: {
+            "provider": "bedrock",
+            "model": "us.openai.gpt-5.6-terra",
+            "api_endpoint": "converse",
+            "aws_region": "us-east-1",
+            "guardrail_enabled": True,
+            "guardrail_intervened": False,
+            "stop_reason": "end_turn",
+            "fallback_used": False,
+        },
+    )
+    runtime = SimpleNamespace(provider=provider)
+
+    line = _provider_line(Settings(provider_name="bedrock"), runtime)
+
+    assert "endpoint=converse" in line
+    assert "region=us-east-1" in line
+    assert "guardrail=enabled" in line
+    assert "stop=end_turn" in line
+
+
 def test_remove_online_id_is_local_and_never_calls_chat(monkeypatch, capsys):
     calls = []
     provider = DeterministicProvider()

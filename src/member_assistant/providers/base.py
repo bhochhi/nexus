@@ -18,11 +18,13 @@ class ProviderError(RuntimeError):
         error_code: Optional[str] = None,
         parameter: Optional[str] = None,
         detail: Optional[str] = None,
+        fallback_allowed: bool = True,
     ) -> None:
         self.status_code = status_code
         self.error_code = error_code
         self.parameter = parameter
         self.detail = detail
+        self.fallback_allowed = fallback_allowed
         parts = [message]
         if status_code is not None:
             parts.append("status={}".format(status_code))
@@ -46,6 +48,14 @@ class ProviderError(RuntimeError):
             }.items()
             if value is not None
         }
+
+
+class ProviderSafetyError(ProviderError):
+    """A provider safety decision that another provider must not bypass."""
+
+    def __init__(self, message: str, **kwargs: Any) -> None:
+        kwargs["fallback_allowed"] = False
+        super().__init__(message, **kwargs)
 
 
 @dataclass(frozen=True)
@@ -98,6 +108,8 @@ class TurnAnalysis:
     slot_updates: List[SlotUpdate] = field(default_factory=list)
     conversation_act: str = "unknown"
     active_goal_relation: str = "none"
+    safety_intervened: bool = False
+    safety_response: Optional[str] = None
 
 
 class ModelProvider(ABC):

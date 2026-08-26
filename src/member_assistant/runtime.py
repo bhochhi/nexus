@@ -351,6 +351,48 @@ class AgentRuntime:
             provider_analysis = self.provider.understand_turn(
                 message, understanding_catalog, goal_context
             )
+            if provider_analysis.safety_intervened:
+                provider_metadata = self.provider.observability_metadata()
+                generation.update(
+                    output={
+                        "safety_intervened": True,
+                        "goal_count": 0,
+                        "accepted_goal_count": 0,
+                    },
+                    metadata=provider_metadata,
+                )
+                self._ensure_member_profile(conversation)
+                conversation["outcome"] = {
+                    "status": provider_metadata.get("stop_reason")
+                    or "safety_intervened"
+                }
+                return {
+                    "conversation": conversation,
+                    "goals": [],
+                    "slot_updates": {},
+                    "conversation_act": "unknown",
+                    "active_goal_relation": "none",
+                    "catalog_revision": self.catalog.revision,
+                    "next_action": "finalize",
+                    "response_parts": [
+                        provider_analysis.safety_response
+                        or "I'm sorry, but I can't help with that request."
+                    ],
+                    "audit_events": state.get("audit_events", [])
+                    + [
+                        {
+                            "event_type": "provider_safety_intervention",
+                            "payload": {
+                                "provider": provider_metadata.get("provider"),
+                                "model": provider_metadata.get("model"),
+                                "stop_reason": provider_metadata.get("stop_reason"),
+                                "guardrail_intervened": provider_metadata.get(
+                                    "guardrail_intervened", False
+                                ),
+                            },
+                        }
+                    ],
+                }
             (
                 provider_matches,
                 canonicalized_provider_goals,

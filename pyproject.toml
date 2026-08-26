@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<9"]
+bedrock = ["boto3>=1.35,<2"]
 observability = [
   "opentelemetry-api>=1.33,<1.38",
   "opentelemetry-sdk>=1.33,<1.38",

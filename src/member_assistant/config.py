@@ -27,9 +27,17 @@ class Settings:
 
     provider_name: str = "openai"
     model_id: str = "gpt-5.6-luna"
+    openai_model_id: str = "gpt-5.6-luna"
+    bedrock_model_id: str = "us.amazon.nova-2-lite-v1:0"
     model_reasoning_effort: str = "low"
     provider_api_key: Optional[str] = None
     allow_provider_fallback: bool = True
+    bedrock_region: str = "us-east-1"
+    bedrock_profile: Optional[str] = None
+    bedrock_max_tokens: int = 1200
+    bedrock_guardrail_id: Optional[str] = None
+    bedrock_guardrail_version: Optional[str] = None
+    bedrock_guardrail_trace: str = "disabled"
     catalog_path: Path = PROJECT_ROOT / "skills" / "catalog"
     available_skills_path: Path = PROJECT_ROOT / "skills" / "available"
     knowledge_path: Path = PROJECT_ROOT / "data" / "knowledge.json"
@@ -80,12 +88,37 @@ class Settings:
             return default
 
         provider = (configured("MODEL_PROVIDER", "openai") or "openai").strip().lower()
+        legacy_model_id = configured("MODEL_ID")
+        openai_model_id = (
+            configured("OPENAI_MODEL_ID")
+            or (legacy_model_id if provider == "openai" else None)
+            or "gpt-5.6-luna"
+        )
+        bedrock_model_id = (
+            configured("BEDROCK_MODEL_ID")
+            or (legacy_model_id if provider == "bedrock" else None)
+            or "us.amazon.nova-2-lite-v1:0"
+        )
+        if provider == "bedrock":
+            model_id = bedrock_model_id
+        elif provider == "openai":
+            model_id = openai_model_id
+        else:
+            model_id = legacy_model_id or "deterministic"
         provider_key = configured("MODEL_API_KEY")
         if provider == "openai":
             provider_key = provider_key or configured("OPENAI_API_KEY")
+        bedrock_region = (
+            configured("BEDROCK_AWS_REGION")
+            or configured("AWS_REGION")
+            or configured("AWS_DEFAULT_REGION")
+            or "us-east-1"
+        )
         return cls(
             provider_name=provider,
-            model_id=configured("MODEL_ID", "gpt-5.6-luna") or "gpt-5.6-luna",
+            model_id=model_id,
+            openai_model_id=openai_model_id,
+            bedrock_model_id=bedrock_model_id,
             model_reasoning_effort=(
                 configured("MODEL_REASONING_EFFORT", "low") or "low"
             ).strip().lower(),
@@ -93,6 +126,18 @@ class Settings:
             allow_provider_fallback=_as_bool(
                 configured("ALLOW_PROVIDER_FALLBACK", "true") or "true"
             ),
+            bedrock_region=bedrock_region.strip(),
+            bedrock_profile=(
+                configured("BEDROCK_AWS_PROFILE") or configured("AWS_PROFILE")
+            ),
+            bedrock_max_tokens=int(
+                configured("BEDROCK_MAX_TOKENS", "1200") or "1200"
+            ),
+            bedrock_guardrail_id=configured("BEDROCK_GUARDRAIL_ID"),
+            bedrock_guardrail_version=configured("BEDROCK_GUARDRAIL_VERSION"),
+            bedrock_guardrail_trace=(
+                configured("BEDROCK_GUARDRAIL_TRACE", "disabled") or "disabled"
+            ).strip().lower(),
             catalog_path=Path(
                 configured(
                     "SKILL_CATALOG_PATH", str(PROJECT_ROOT / "skills" / "catalog")

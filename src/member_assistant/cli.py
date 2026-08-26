@@ -16,7 +16,12 @@ from member_assistant.runtime import AgentRuntime
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Agentic Member Assistant POC")
     parser.add_argument("--session", default="demo-session", help="durable session identifier")
-    parser.add_argument("--provider", choices=("openai", "mock"), help="model provider override")
+    parser.add_argument(
+        "--provider",
+        choices=("openai", "bedrock", "mock"),
+        help="model provider override",
+    )
+    parser.add_argument("--model", help="model ID override for the selected provider")
     parser.add_argument("--db", type=Path, help="SQLite state path override")
     parser.add_argument(
         "--session-ttl-minutes",
@@ -78,6 +83,20 @@ def _provider_line(settings: Settings, runtime: AgentRuntime, *, turn: bool = Fa
         parts.append("endpoint={}".format(metadata["api_endpoint"]))
     if metadata.get("reasoning_effort"):
         parts.append("reasoning={}".format(metadata["reasoning_effort"]))
+    if metadata.get("aws_region"):
+        parts.append("region={}".format(metadata["aws_region"]))
+    if metadata.get("guardrail_enabled") is not None:
+        parts.append(
+            "guardrail={}".format(
+                "intervened"
+                if metadata.get("guardrail_intervened")
+                else "enabled"
+                if metadata.get("guardrail_enabled")
+                else "disabled"
+            )
+        )
+    if metadata.get("stop_reason"):
+        parts.append("stop={}".format(metadata["stop_reason"]))
     if not turn:
         policy = (
             "not applicable"
@@ -104,7 +123,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(argv)
     settings = Settings.from_env()
     if args.provider:
-        settings = replace(settings, provider_name=args.provider)
+        selected_model = {
+            "openai": settings.openai_model_id,
+            "bedrock": settings.bedrock_model_id,
+            "mock": "deterministic",
+        }[args.provider]
+        settings = replace(
+            settings, provider_name=args.provider, model_id=selected_model
+        )
+    if args.model:
+        settings = replace(settings, model_id=args.model)
     if args.db:
         settings = replace(settings, state_db_path=args.db)
     if args.session_ttl_minutes is not None:

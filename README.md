@@ -5,7 +5,7 @@ A small, runnable financial-services member-assistance proof of concept built wi
 ## What is included
 
 - A fixed LangGraph lifecycle for state-aware goal understanding, safe ordering, durable goal/slot clarification, policy checks, generic skill execution, interruption, resumption, confirmation, and confirmed handoff.
-- A provider-neutral `ModelProvider` interface. `MODEL_PROVIDER=openai` and `MODEL_ID=gpt-5.6-luna` are the demo defaults; OpenAI Responses API code is isolated in one adapter. A deterministic provider supports offline demos and tests and is the availability fallback by default.
+- A provider-neutral `ModelProvider` interface. Direct OpenAI Responses and Amazon Bedrock Converse are isolated adapters behind the same turn-understanding contract. Bedrock supports Amazon Nova and Bedrock-hosted OpenAI models such as GPT-5.6 Terra. A deterministic provider supports offline demos and availability fallback.
 - A versioned file catalog that polls a lightweight active routing index. New immutable skill artifacts activate without process restart or graph recompilation; invalid index updates retain the last-known-good catalog.
 - One portable, business-facing `SKILL.md` artifact format plus a safe declarative workflow interpreter shared by built-in and custom authoring archetypes. There is no parallel JSON skill representation.
 - Approved-knowledge, guided-balance, deterministic internal-transfer, and live-agent skills active at startup. Online-ID recovery is packaged separately for live installation.
@@ -15,12 +15,15 @@ A small, runnable financial-services member-assistance proof of concept built wi
 
 ## Setup
 
-Python 3.9 or later is supported.
+Python 3.9 or later is supported by the base POC. Use Python 3.10 or later for
+Bedrock so Boto3 receives current AWS service updates and security fixes; the
+last Python 3.9-compatible SDK can run the adapter but emits a deprecation
+warning.
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e '.[dev,observability]'
+python -m pip install -e '.[dev,observability,bedrock]'
 ```
 
 Copy the safe template to the default user-secret location and add your API
@@ -65,7 +68,59 @@ SESSION_TTL_SECONDS=600
 member-assistant --db data/demo.db --session-ttl-minutes 10
 ```
 
-The default `MODEL_PROVIDER` is `openai`, and the default model is `gpt-5.6-luna`. The OpenAI adapter uses the Responses API with `MODEL_REASONING_EFFORT=low`; it does not send legacy `temperature` options. Configure `OPENAI_API_KEY` in `~/.secrets/dev.env`. If no key is present—or the provider fails—and `ALLOW_PROVIDER_FALLBACK=true` (the template default), the runtime safely uses deterministic catalog routing. Set `ALLOW_PROVIDER_FALLBACK=false` to require the configured provider and expose API failures directly in the CLI. To use a different user-secret file, export `MEMBER_ASSISTANT_ENV_FILE=/path/to/file`; the project `.env` remains the lower-priority local configuration source. The repository's `.env.example` contains no secret and is never read at runtime.
+The default `MODEL_PROVIDER` is `openai`, and the default direct OpenAI model is
+`gpt-5.6-luna`. The OpenAI adapter uses the Responses API with
+`MODEL_REASONING_EFFORT=low`; it does not send legacy `temperature` options.
+Configure `OPENAI_API_KEY` in `~/.secrets/dev.env`.
+
+For provider interoperability, configure each provider's model once and switch
+only `MODEL_PROVIDER`:
+
+```dotenv
+MODEL_PROVIDER=bedrock
+OPENAI_MODEL_ID=gpt-5.6-luna
+BEDROCK_MODEL_ID=us.amazon.nova-2-lite-v1:0
+# To use Terra through Bedrock instead:
+# BEDROCK_MODEL_ID=us.openai.gpt-5.6-terra
+
+BEDROCK_AWS_REGION=us-east-1
+BEDROCK_AWS_PROFILE=member-assistant-dev
+```
+
+The Bedrock adapter uses the standard AWS credential chain. Do not put AWS
+access or secret keys in the project `.env`; use an AWS profile for local work
+or a workload/IAM role in a deployed service. The calling identity needs model
+inference access, including `bedrock:InvokeModel`, and the selected model must be
+available in the configured Region. You can also test a one-off combination
+with `member-assistant --provider bedrock --model <model-id>`.
+`MODEL_REASONING_EFFORT` currently applies only to the direct OpenAI adapter;
+Bedrock Converse uses each selected model's default reasoning behavior so the
+shared adapter does not send a model-specific option that Nova or Terra might
+reject.
+
+An optional Bedrock Guardrail is attached to every Converse call when its ID and
+version are both configured:
+
+```dotenv
+BEDROCK_GUARDRAIL_ID=your-guardrail-id
+BEDROCK_GUARDRAIL_VERSION=DRAFT
+BEDROCK_GUARDRAIL_TRACE=disabled
+```
+
+The AWS identity also needs permission to apply that guardrail. A
+`guardrail_intervened` result becomes the member-facing configured block message
+and a redacted audit event. It is a safety decision, not provider downtime, so
+the deterministic fallback never bypasses it. Raw guardrail assessments are not
+logged even when AWS guardrail tracing is enabled.
+
+If no OpenAI key is present—or an ordinary configured-provider call fails—and
+`ALLOW_PROVIDER_FALLBACK=true` (the template default), the runtime safely uses
+deterministic catalog routing. Set `ALLOW_PROVIDER_FALLBACK=false` to require the
+configured provider and expose API failures directly in the CLI. To use a
+different user-secret file, export
+`MEMBER_ASSISTANT_ENV_FILE=/path/to/file`; the project `.env` remains the
+lower-priority local configuration source. The repository's `.env.example`
+contains no secret and is never read at runtime.
 
 
 Useful CLI commands are `/skills`, `/state`, `/trace`, `/add-online-id`,
@@ -133,7 +188,7 @@ sqlite3 data/demo.db "SELECT json_extract(payload_json, '$.category') AS categor
 
 The runtime emits one trace for each member turn, with nested observations for state loading and persistence, semantic turn understanding, skill-gap detection, planning, policy evaluation, skill execution, declarative workflow steps, mock tools, grounded model responses, confirmation, and outcomes. Newly published declarative skills receive the same tracing automatically.
 
-Console tracing is enabled by default. Interactive runs use compact, color-coded output for the important LLM, policy, skill, tool, and turn observations. It records decision evidence such as goal candidates and confidence, selected skill and version, risk tier, policy result, model/provider and fallback status, tool outcome, latency, and OpenAI token usage when available. It does not record hidden model reasoning. Set `TRACE_CONSOLE_FORMAT=json` or pass `--trace-format json` when machine-readable JSON lines are needed; `--log-level DEBUG` also displays lower-level graph and state spans in pretty mode.
+Console tracing is enabled by default. Interactive runs use compact, color-coded output for the important LLM, policy, skill, tool, and turn observations. It records decision evidence such as goal candidates and confidence, selected skill and version, risk tier, policy result, model/provider and fallback status, tool outcome, latency, and provider token usage when available. It does not record hidden model reasoning. Set `TRACE_CONSOLE_FORMAT=json` or pass `--trace-format json` when machine-readable JSON lines are needed; `--log-level DEBUG` also displays lower-level graph and state spans in pretty mode.
 
 ### How to read the CLI trace
 
@@ -144,7 +199,7 @@ milliseconds.
 
 | Output | Meaning |
 | --- | --- |
-| `HTTP Request ... 200 OK` | OpenAI SDK HTTP logging. It confirms that OpenAI accepted the request; it is not a Langfuse export message. |
+| `HTTP Request ... 200 OK` | Direct OpenAI SDK HTTP logging. It confirms that OpenAI accepted the request; it is not a Langfuse export message. Bedrock calls do not normally print this line. |
 | `LLM llm.turn_understanding` | The model interpreted supported goals, all active-task slot updates, corrections, ambiguity, or a skill gap. It did not validate data or execute the goal. |
 | `POLICY policy.evaluate` | Deterministic authentication, authorization, risk, and confirmation controls evaluated the selected skill. |
 | `TOOL tool.<name>` | A typed integration was called. Every integration in this POC is mock/local even when its name describes accounts, transfers, or a live agent. |
@@ -159,6 +214,10 @@ Common metadata fields are:
 | --- | --- |
 | `provider=openai` / `model=gpt-5.6-luna` | The active provider adapter and exact model ID. |
 | `endpoint=responses` | The OpenAI Responses API handled the model call. |
+| `endpoint=converse` / `region=us-east-1` | Amazon Bedrock Converse handled the call in the displayed AWS Region. |
+| `guardrail=enabled` | A configured Bedrock Guardrail was attached. `guardrail=intervened` means it blocked the input or output and fallback was not used. |
+| `stop=end_turn` | Bedrock's reason for ending generation. Other useful values include `max_tokens`, `guardrail_intervened`, and `content_filtered`. |
+| `request_id` / `provider_ms` | AWS request identifier and Bedrock-reported model latency for troubleshooting. |
 | `reasoning=low` | Configured reasoning effort. This is a setting, not hidden reasoning text; chain-of-thought is not logged. |
 | `fallback=no` | The configured provider succeeded. `fallback=yes` means the deterministic availability provider handled that operation. |
 | `in_tokens` / `out_tokens` | Tokens sent to and returned by the model for this call. |
@@ -333,7 +392,7 @@ roadmap are in [Nexus Skill v1 authoring and publication](docs/skill-authoring-a
 pytest
 ```
 
-The suite covers personalized greeting, no-goal escalation offers, goal disambiguation, natural slot fulfillment, grounded FAQ answers, balance clarification and restart durability, multi-goal ordering, transfer review/confirmation/execution, authentication policy, interruption with resume and discard, confirmed live-agent handoff, runtime skill discovery, custom archetypes without Python, immutable publication and rollback, metadata-first loading, exact version pinning across restart, tool-dependency rejection, stable graph identity, and invalid-catalog rollback.
+The suite covers personalized greeting, no-goal escalation offers, goal disambiguation, natural slot fulfillment, grounded FAQ answers, balance clarification and restart durability, multi-goal ordering, transfer review/confirmation/execution, authentication policy, interruption with resume and discard, confirmed live-agent handoff, runtime skill discovery, custom archetypes without Python, immutable publication and rollback, metadata-first loading, exact version pinning across restart, tool-dependency rejection, stable graph identity, invalid-catalog rollback, direct OpenAI requests, Bedrock Converse compatibility for Nova/Terra, and non-bypassable Guardrail interventions.
 
 ## Project map
 
@@ -345,7 +404,7 @@ src/member_assistant/
   skill_cli.py                validate, publish, inspect, activate/deactivate
   state_store.py, policy.py   SQLite durability/audit and deterministic controls
   observability.py            console/memory tracing and Langfuse OTLP exporter
-  providers/                  provider-neutral contract, OpenAI, offline provider
+  providers/                  shared turn contract, OpenAI, Bedrock, offline adapters
   skills/                     one validated declarative workflow interpreter
   tools/                      typed mock adapters and generic tool registry
   cli.py                      local chat demo

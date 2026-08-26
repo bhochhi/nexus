@@ -37,6 +37,8 @@ class FallbackProvider(ModelProvider):
             self._last_call_metadata = self.primary.observability_metadata()
             return result
         except ProviderError as exc:
+            if not exc.fallback_allowed:
+                raise
             result = self.fallback.identify_goals(message, catalog, context)
             self._last_call_metadata = {
                 **self.fallback.observability_metadata(),
@@ -57,6 +59,8 @@ class FallbackProvider(ModelProvider):
             self._last_call_metadata = self.primary.observability_metadata()
             return result
         except ProviderError as exc:
+            if not exc.fallback_allowed:
+                raise
             result = self.fallback.understand_turn(message, catalog, context)
             self._last_call_metadata = {
                 **self.fallback.observability_metadata(),
@@ -72,6 +76,8 @@ class FallbackProvider(ModelProvider):
             self._last_call_metadata = self.primary.observability_metadata()
             return result
         except ProviderError as exc:
+            if not exc.fallback_allowed:
+                raise
             result = self.fallback.generate_response(instruction, facts)
             self._last_call_metadata = {
                 **self.fallback.observability_metadata(),
@@ -100,5 +106,27 @@ def build_provider(settings: Settings) -> ModelProvider:
             settings.provider_api_key,
             reasoning_effort=settings.model_reasoning_effort,
         )
+        return FallbackProvider(primary, fallback) if settings.allow_provider_fallback else primary
+    if settings.provider_name == "bedrock":
+        from .bedrock_provider import BedrockProvider
+
+        try:
+            primary = BedrockProvider(
+                settings.model_id,
+                region=settings.bedrock_region,
+                profile=settings.bedrock_profile,
+                max_tokens=settings.bedrock_max_tokens,
+                guardrail_id=settings.bedrock_guardrail_id,
+                guardrail_version=settings.bedrock_guardrail_version,
+                guardrail_trace=settings.bedrock_guardrail_trace,
+            )
+        except ProviderError as exc:
+            if not settings.allow_provider_fallback or not exc.fallback_allowed:
+                raise
+            return DeterministicProvider(
+                fallback_from="bedrock",
+                fallback_reason=exc.error_code or "initialization_failed",
+            )
+        fallback = DeterministicProvider()
         return FallbackProvider(primary, fallback) if settings.allow_provider_fallback else primary
     raise ProviderError("Unsupported MODEL_PROVIDER: {}".format(settings.provider_name))
