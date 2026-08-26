@@ -4,7 +4,13 @@ from member_assistant.config import PROJECT_ROOT
 
 
 def _install_navigation(runtime):
-    source = PROJECT_ROOT / "skills" / "available" / "online_id" / "SKILL.md"
+    source = (
+        PROJECT_ROOT
+        / "skills"
+        / "available"
+        / "online_id_recovery"
+        / "SKILL.md"
+    )
     return runtime.catalog.install(source)
 
 

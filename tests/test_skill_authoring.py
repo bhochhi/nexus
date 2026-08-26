@@ -10,7 +10,11 @@ from member_assistant.skill_authoring import FileSkillPublisher, SkillMarkdownCo
 
 
 ONLINE_ID = (
-    PROJECT_ROOT / "skills" / "available" / "online_id" / "SKILL.md"
+    PROJECT_ROOT
+    / "skills"
+    / "available"
+    / "online_id_recovery"
+    / "SKILL.md"
 )
 
 
@@ -18,10 +22,11 @@ def test_every_catalog_capability_is_a_versioned_skill_markdown():
     catalog = PROJECT_ROOT / "skills" / "catalog"
     artifacts = sorted(catalog.glob("*/*/SKILL.md"))
 
-    assert len(artifacts) == 4
     assert not list(catalog.rglob("*.json"))
     assert (catalog / "active.yaml").is_file()
     loaded = SkillCatalog(catalog)
+    assert len(loaded.routes()) == 4
+    assert len(artifacts) >= len(loaded.routes())
     assert all(
         loaded.get(route.name, route.version, route.artifact_hash) is not None
         for route in loaded.routes()

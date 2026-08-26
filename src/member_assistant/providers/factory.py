@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from member_assistant.catalog import SkillRoutingDefinition
 from member_assistant.config import Settings
-from .base import GoalAnalysis, GoalMatch, ModelProvider, ProviderError
+from .base import GoalMatch, ModelProvider, ProviderError, TurnAnalysis
 from .deterministic import DeterministicProvider
 
 
@@ -46,18 +46,18 @@ class FallbackProvider(ModelProvider):
             }
             return result
 
-    def analyze_message(
+    def understand_turn(
         self,
         message: str,
         catalog: Sequence[SkillRoutingDefinition],
         context: Optional[Mapping[str, Any]] = None,
-    ) -> GoalAnalysis:
+    ) -> TurnAnalysis:
         try:
-            result = self.primary.analyze_message(message, catalog, context)
+            result = self.primary.understand_turn(message, catalog, context)
             self._last_call_metadata = self.primary.observability_metadata()
             return result
         except ProviderError as exc:
-            result = self.fallback.analyze_message(message, catalog, context)
+            result = self.fallback.understand_turn(message, catalog, context)
             self._last_call_metadata = {
                 **self.fallback.observability_metadata(),
                 "fallback_used": True,

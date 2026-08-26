@@ -19,9 +19,13 @@ authoring tool / Git
                               catalog poll / future event
                                            |
                                            v
-member utterance -> routing metadata -> exact artifact -> generic executor
-                                             |
-                                  task stores version + hash
+member utterance -> semantic turn understanding -> routing metadata
+                         |                            |
+              schema-declared slot updates           v
+                         |                    exact artifact
+                         +------> durable task <------+
+                                      |
+                              generic executor
 ```
 
 1. `SKILL.md` contains YAML frontmatter for machine-readable behavior and a
@@ -43,6 +47,14 @@ member utterance -> routing metadata -> exact artifact -> generic executor
 8. Publication, activation, rollback, and deactivation append timestamped,
    actor-attributed events containing the exact version, hash, and catalog
    revision to `catalog-events.yaml`.
+
+At runtime the active skill's JSON input schema is also the contract for semantic
+slot interpretation. The provider may understand several fields or a correction
+from one natural utterance, but only schema-declared, sufficiently confident
+values enter durable task state. Tools and workflow validators remain the
+authority for account resolution, value validity, policy, confirmation, and
+execution. This separation keeps language flexible without making the workflow
+probabilistic.
 
 For this local POC the artifact store is `skills/catalog/<name>/<version>/` and
 the routing index is `skills/catalog/active.yaml`. A production catalog would
@@ -76,7 +88,7 @@ safe shared operation set. Only a journey needing precise ordered controls—suc
 as internal transfer—authors a workflow inline. More reusable recipes can be
 added to the compiler without changing the catalog or runtime contract.
 
-See `skills/available/online_id/SKILL.md` for the navigation example.
+See `skills/available/online_id_recovery/SKILL.md` for the navigation example.
 
 ## Archetypes are presets, not a closed capability taxonomy
 
@@ -108,19 +120,19 @@ extension; a new business capability composed from existing primitives is not.
 Validate without changing the catalog:
 
 ```bash
-member-assistant-skills validate skills/available/online_id/SKILL.md
+member-assistant-skills validate skills/available/online_id_recovery/SKILL.md
 ```
 
 Publish and activate atomically:
 
 ```bash
-member-assistant-skills publish skills/available/online_id/SKILL.md
+member-assistant-skills publish skills/available/online_id_recovery/SKILL.md
 ```
 
 Stage an artifact without routing new work to it:
 
 ```bash
-member-assistant-skills publish skills/available/online_id/SKILL.md --staged
+member-assistant-skills publish skills/available/online_id_recovery/SKILL.md --staged
 ```
 
 Inspect the active metadata and all immutable versions:

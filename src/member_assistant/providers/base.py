@@ -81,9 +81,23 @@ class SkillGap:
 
 
 @dataclass(frozen=True)
-class GoalAnalysis:
+class SlotUpdate:
+    """One model-interpreted active-task input with bounded confidence."""
+
+    field: str
+    value: Any
+    confidence: float
+
+
+@dataclass(frozen=True)
+class TurnAnalysis:
+    """Provider-neutral semantic interpretation of one member turn."""
+
     goals: List[GoalMatch] = field(default_factory=list)
     skill_gap: Optional[SkillGap] = None
+    slot_updates: List[SlotUpdate] = field(default_factory=list)
+    conversation_act: str = "unknown"
+    active_goal_relation: str = "none"
 
 
 class ModelProvider(ABC):
@@ -97,20 +111,20 @@ class ModelProvider(ABC):
 
         return {"provider": self.name, "model": self.model_id, "fallback_used": False}
 
-    def analyze_message(
+    def understand_turn(
         self,
         message: str,
         catalog: Sequence[SkillRoutingDefinition],
         context: Optional[Mapping[str, Any]] = None,
-    ) -> GoalAnalysis:
-        """Understand supported goals and optional gaps in one provider operation.
+    ) -> TurnAnalysis:
+        """Understand objectives, task-relative inputs, and optional gaps.
 
-        Existing/offline providers remain compatible by returning only their goal matches.
-        Semantic providers can override this to identify a clear unsupported objective in the
-        same call.
+        Offline providers can return only goal matches. Semantic providers can additionally
+        extract every supplied or corrected input for the active task. Execution, validation,
+        and confirmation remain outside this contract.
         """
 
-        return GoalAnalysis(goals=self.identify_goals(message, catalog, context))
+        return TurnAnalysis(goals=self.identify_goals(message, catalog, context))
 
     @abstractmethod
     def identify_goals(

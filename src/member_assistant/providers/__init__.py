@@ -1,15 +1,23 @@
 """Model-provider adapters."""
 
-from .base import GoalAnalysis, GoalMatch, ModelProvider, ProviderError, SkillGap
+from .base import (
+    GoalMatch,
+    ModelProvider,
+    ProviderError,
+    SkillGap,
+    SlotUpdate,
+    TurnAnalysis,
+)
 from .deterministic import DeterministicProvider
 from .factory import build_provider
 
 __all__ = [
-    "GoalAnalysis",
     "GoalMatch",
     "ModelProvider",
     "ProviderError",
     "SkillGap",
+    "SlotUpdate",
+    "TurnAnalysis",
     "DeterministicProvider",
     "build_provider",
 ]

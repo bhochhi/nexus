@@ -190,7 +190,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 print(json.dumps(runtime.observability.describe(), indent=2, sort_keys=True))
                 continue
             if message == "/add-online-id":
-                source = settings.available_skills_path / "online_id" / "SKILL.md"
+                source = (
+                    settings.available_skills_path
+                    / "online_id_recovery"
+                    / "SKILL.md"
+                )
                 target = runtime.catalog.install(source, runtime.tools.contracts())
                 print(
                     _color("assistant>", "1;32", color_enabled)
@@ -212,6 +216,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 else:
                     response = "Online-ID recovery is already inactive."
                 print(_color("assistant>", "1;32", color_enabled) + " " + response)
+                continue
+            if message.startswith("/"):
+                print(
+                    _color("error>", "1;31", color_enabled)
+                    + " Unknown local command. Use /skills, /state, /trace, "
+                    "/add-online-id, /remove-online-id, or /quit."
+                )
                 continue
             try:
                 reply = runtime.chat(args.session, message)

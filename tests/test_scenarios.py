@@ -1,9 +1,10 @@
 from member_assistant.config import PROJECT_ROOT
 from member_assistant.providers import (
     DeterministicProvider,
-    GoalAnalysis,
     GoalMatch,
     SkillGap,
+    SlotUpdate,
+    TurnAnalysis,
 )
 
 
@@ -24,10 +25,10 @@ class _NoisyBalanceProvider(DeterministicProvider):
 
 
 class _GapAwareProvider(DeterministicProvider):
-    def analyze_message(self, message, catalog, context=None):
-        analysis = super().analyze_message(message, catalog, context)
+    def understand_turn(self, message, catalog, context=None):
+        analysis = super().understand_turn(message, catalog, context)
         if not analysis.goals and "online id" in message.casefold():
-            return GoalAnalysis(
+            return TurnAnalysis(
                 goals=[],
                 skill_gap=SkillGap(
                     objective="recover your online ID",
@@ -36,6 +37,65 @@ class _GapAwareProvider(DeterministicProvider):
                 ),
             )
         return analysis
+
+
+class _DisplayNameGoalProvider(DeterministicProvider):
+    """Simulates a semantic model returning a friendly label as the goal ID."""
+
+    def understand_turn(self, message, catalog, context=None):
+        if "online id" in message.casefold():
+            return TurnAnalysis(
+                goals=[
+                    GoalMatch(
+                        skill_name="online_id_recovery",
+                        goal="recover your online ID",
+                        confidence=0.86,
+                    )
+                ]
+            )
+        return super().understand_turn(message, catalog, context)
+
+
+class _NaturalTurnProvider(DeterministicProvider):
+    """Models semantic multi-slot extraction and natural-number normalization."""
+
+    def understand_turn(self, message, catalog, context=None):
+        analysis = super().understand_turn(message, catalog, context)
+        normalized = message.casefold()
+        slot_updates = list(analysis.slot_updates)
+        conversation_act = analysis.conversation_act
+        relation = analysis.active_goal_relation
+        if "from saving to checking" in normalized:
+            slot_updates.extend(
+                [
+                    SlotUpdate("source_account", "savings", 1.0),
+                    SlotUpdate("destination_account", "checking", 1.0),
+                ]
+            )
+            conversation_act = "provide_information"
+            relation = "continue"
+        if "two hundred" in normalized:
+            slot_updates.append(SlotUpdate("amount", "200.00", 1.0))
+            conversation_act = (
+                "correction" if "actually" in normalized else "provide_information"
+            )
+            relation = "continue"
+        if "checking ending in 1001" in normalized:
+            slot_updates.extend(
+                [
+                    SlotUpdate("source_account", "checking", 0.99),
+                    SlotUpdate("amount", "1001", 0.20),
+                ]
+            )
+            conversation_act = "provide_information"
+            relation = "continue"
+        return TurnAnalysis(
+            goals=analysis.goals,
+            skill_gap=analysis.skill_gap,
+            slot_updates=slot_updates,
+            conversation_act=conversation_act,
+            active_goal_relation=relation,
+        )
 
 
 def test_grounded_faq_uses_approved_source(runtime_factory):
@@ -172,7 +232,11 @@ def test_reception_only_advertises_currently_installed_skills(runtime_factory):
     assert "recover your online ID" not in before.text
 
     runtime.catalog.install(
-        PROJECT_ROOT / "skills" / "available" / "online_id" / "SKILL.md"
+        PROJECT_ROOT
+        / "skills"
+        / "available"
+        / "online_id_recovery"
+        / "SKILL.md"
     )
 
     after = runtime.chat("after-install", "hello")
@@ -224,7 +288,11 @@ def test_skill_gap_during_slot_collection_preserves_the_active_goal(runtime_fact
 def test_installed_skill_is_not_reported_as_a_gap(runtime_factory):
     runtime = runtime_factory(provider=_GapAwareProvider())
     runtime.catalog.install(
-        PROJECT_ROOT / "skills" / "available" / "online_id" / "SKILL.md"
+        PROJECT_ROOT
+        / "skills"
+        / "available"
+        / "online_id_recovery"
+        / "SKILL.md"
     )
 
     reply = runtime.chat("gap-closed", "recover my online id")
@@ -235,6 +303,61 @@ def test_installed_skill_is_not_reported_as_a_gap(runtime_factory):
         event["event_type"] == "skill_gap"
         for event in runtime.store.audit_events("gap-closed")
     )
+
+
+def test_display_name_goal_is_canonicalized_without_false_clarification(
+    runtime_factory,
+):
+    runtime = runtime_factory(provider=_DisplayNameGoalProvider())
+    runtime.catalog.install(
+        PROJECT_ROOT
+        / "skills"
+        / "available"
+        / "online_id_recovery"
+        / "SKILL.md"
+    )
+
+    reply = runtime.chat("goal-alias", "What is my online ID?")
+
+    assert reply.selected_skill == "online_id_recovery"
+    assert "approved online-ID recovery page" in reply.text
+    assert runtime.inspect_state("goal-alias")["pending_goal_clarification"] is None
+
+
+def test_persisted_duplicate_goal_clarification_recovers_on_yes(runtime_factory):
+    runtime = runtime_factory(provider=_DisplayNameGoalProvider())
+    runtime.catalog.install(
+        PROJECT_ROOT
+        / "skills"
+        / "available"
+        / "online_id_recovery"
+        / "SKILL.md"
+    )
+    state = runtime.inspect_state("old-goal-alias")
+    state["pending_goal_clarification"] = {
+        "candidates": [
+            {
+                "skill_name": "online_id_recovery",
+                "goal": "recover your online ID",
+                "confidence": 0.86,
+                "inputs": {},
+            },
+            {
+                "skill_name": "online_id_recovery",
+                "goal": "recover_online_id",
+                "confidence": 0.84,
+                "inputs": {},
+            },
+        ],
+        "question": "Did you want to recover your online ID or recover your online ID?",
+    }
+    runtime.store.save("old-goal-alias", state)
+
+    reply = runtime.chat("old-goal-alias", "yes")
+
+    assert reply.selected_skill == "online_id_recovery"
+    assert "approved online-ID recovery page" in reply.text
+    assert runtime.inspect_state("old-goal-alias")["pending_goal_clarification"] is None
 
 
 def test_repeated_no_goal_turns_offer_but_do_not_auto_start_handoff(runtime_factory):
@@ -286,6 +409,77 @@ def test_natural_slot_answers_continue_transfer_without_reclassifying(runtime_fa
     assert "Review mock transfer" in review.text
     assert "Checking ending in 1001" in review.text
     assert "Savings ending in 2002" in review.text
+
+
+def test_semantic_turn_understanding_collects_multiple_slots_and_word_amount(
+    runtime_factory,
+):
+    runtime = runtime_factory(provider=_NaturalTurnProvider())
+
+    source = runtime.chat("semantic-slots", "I want to make a transfer")
+    assert "money come from" in source.text
+
+    accounts = runtime.chat("semantic-slots", "from saving to checking")
+    assert "How much" in accounts.text
+    assert "source account and destination account" in accounts.text
+    state = runtime.inspect_state("semantic-slots")
+    assert state["active_task"]["inputs"]["source_account"] == "savings"
+    assert state["active_task"]["inputs"]["destination_account"] == "checking"
+    assert state["no_goal_turn_count"] == 0
+
+    review = runtime.chat("semantic-slots", "two hundred")
+    assert "$200.00" in review.text
+    assert "Savings ending in 2002" in review.text
+    assert "Checking ending in 1001" in review.text
+    assert "live agent" not in review.text
+
+
+def test_semantic_correction_revalidates_and_replaces_confirmation(runtime_factory):
+    runtime = runtime_factory(provider=_NaturalTurnProvider())
+    first_review = runtime.chat(
+        "semantic-correction", "Transfer $50 from checking to savings"
+    )
+    assert "$50.00" in first_review.text
+
+    corrected_review = runtime.chat(
+        "semantic-correction", "actually make it two hundred"
+    )
+
+    assert "$200.00" in corrected_review.text
+    assert "I've updated the amount" in corrected_review.text
+    assert "Confirm this transfer" in corrected_review.text
+    state = runtime.inspect_state("semantic-correction")
+    assert state["confirmation_status"] == "pending"
+    assert state["active_task"]["inputs"]["amount"] == "200.00"
+    assert state["outcome"] is None
+
+
+def test_semantic_understanding_continues_an_inflight_deactivated_version(
+    runtime_factory,
+):
+    runtime = runtime_factory(provider=_NaturalTurnProvider())
+    runtime.chat("semantic-pinned", "I want to make a transfer")
+    runtime.catalog.deactivate("internal_transfer")
+
+    reply = runtime.chat("semantic-pinned", "from saving to checking")
+
+    assert "How much" in reply.text
+    state = runtime.inspect_state("semantic-pinned")
+    assert state["active_task"]["skill_version"] == "2.0.0"
+    assert state["active_task"]["inputs"]["source_account"] == "savings"
+    assert state["active_task"]["inputs"]["destination_account"] == "checking"
+
+
+def test_low_confidence_account_suffix_is_not_accepted_as_amount(runtime_factory):
+    runtime = runtime_factory(provider=_NaturalTurnProvider())
+    runtime.chat("semantic-confidence", "I want to make a transfer")
+
+    reply = runtime.chat("semantic-confidence", "checking ending in 1001")
+
+    assert "receive the money" in reply.text
+    state = runtime.inspect_state("semantic-confidence")
+    assert state["active_task"]["inputs"]["source_account"] == "checking"
+    assert "amount" not in state["active_task"]["inputs"]
 
 
 def test_clear_new_goal_interrupts_slot_collection_then_offers_resume(runtime_factory):

@@ -4,7 +4,7 @@ import re
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from member_assistant.catalog import SkillRoutingDefinition
-from .base import GoalMatch, ModelProvider
+from .base import GoalMatch, ModelProvider, SlotUpdate, TurnAnalysis
 
 
 class DeterministicProvider(ModelProvider):
@@ -55,7 +55,7 @@ class DeterministicProvider(ModelProvider):
                         skill_name=skill.name,
                         goal=best_goal,
                         confidence=min(0.99, 0.76 + best_score * 0.08),
-                        inputs=self._extract_inputs(skill, message),
+                        inputs=self.extract_inputs(skill, message),
                     )
                 )
 
@@ -70,6 +70,32 @@ class DeterministicProvider(ModelProvider):
         ]
         return handoffs[:1] if handoffs else matches
 
+    def understand_turn(
+        self,
+        message: str,
+        catalog: Sequence[SkillRoutingDefinition],
+        context: Optional[Mapping[str, Any]] = None,
+    ) -> TurnAnalysis:
+        goals = self.identify_goals(message, catalog, context)
+        active_name = str((context or {}).get("active_skill") or "")
+        active = next((skill for skill in catalog if skill.name == active_name), None)
+        extracted = self.extract_inputs(active, message) if active else {}
+        # The offline fallback fills only the field currently being elicited. Broad
+        # multi-slot interpretation belongs to a semantic provider; otherwise a
+        # four-digit account suffix can be mistaken for a transfer amount.
+        missing_field = str((context or {}).get("missing_field") or "")
+        slot_updates = (
+            [SlotUpdate(missing_field, extracted[missing_field], 1.0)]
+            if missing_field and missing_field in extracted
+            else []
+        )
+        return TurnAnalysis(
+            goals=goals,
+            slot_updates=slot_updates,
+            conversation_act="provide_information" if slot_updates else "unknown",
+            active_goal_relation="continue" if slot_updates else "none",
+        )
+
     def generate_response(self, instruction: str, facts: Dict[str, Any]) -> str:
         template = facts.get("template") or instruction
         try:
@@ -77,7 +103,7 @@ class DeterministicProvider(ModelProvider):
         except (KeyError, ValueError):
             return str(instruction)
 
-    def _extract_inputs(
+    def extract_inputs(
         self, skill: SkillRoutingDefinition, message: str
     ) -> Dict[str, Any]:
         normalized = message.lower()

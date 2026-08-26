@@ -58,7 +58,7 @@ def test_openai_analysis_uses_responses_api_and_returns_skill_gap(runtime_factor
     )
     provider = _provider(responses)
 
-    analysis = provider.analyze_message(
+    analysis = provider.understand_turn(
         "recover my online id", runtime.catalog.list(), {}
     )
 
@@ -76,10 +76,13 @@ def test_openai_analysis_uses_responses_api_and_returns_skill_gap(runtime_factor
     assert json.loads(request["input"])["output_requirement"] == (
         "Return valid JSON only."
     )
+    supplied_goal = json.loads(request["input"])["skills"][0]["goals"][0]
+    assert set(supplied_goal) == {"name", "display_name"}
+    assert "never return its display_name" in request["instructions"]
     assert "temperature" not in request
     assert "messages" not in request
     metadata = provider.observability_metadata()
-    assert metadata["operation"] == "analyze_message"
+    assert metadata["operation"] == "understand_turn"
     assert metadata["api_endpoint"] == "responses"
     assert metadata["reasoning_effort"] == "low"
     assert metadata["input_tokens"] == 25
@@ -98,6 +101,49 @@ def test_openai_response_generation_uses_responses_output_text():
     assert request["store"] is False
     assert "text" not in request
     assert provider.observability_metadata()["operation"] == "generate_response"
+
+
+def test_openai_understands_multiple_active_task_slots(runtime_factory):
+    runtime = runtime_factory()
+    responses = _FakeResponses(
+        json.dumps(
+            {
+                "goals": [],
+                "slot_updates": [
+                    {"field": "source_account", "value": "savings", "confidence": 0.98},
+                    {"field": "destination_account", "value": "checking", "confidence": 0.97},
+                    {"field": "amount", "value": "200.00", "confidence": 0.99},
+                    {"field": "undeclared", "value": "ignored", "confidence": 1.0},
+                ],
+                "conversation_act": "provide_information",
+                "active_goal_relation": "continue",
+                "skill_gap": None,
+            }
+        )
+    )
+    provider = _provider(responses)
+
+    analysis = provider.understand_turn(
+        "from saving to checking, two hundred",
+        runtime.catalog.list(),
+        {
+            "active_skill": "internal_transfer",
+            "active_goal": "make_internal_transfer",
+            "task_status": "awaiting_input",
+            "missing_field": "source_account",
+        },
+    )
+
+    assert [(item.field, item.value) for item in analysis.slot_updates] == [
+        ("source_account", "savings"),
+        ("destination_account", "checking"),
+        ("amount", "200.00"),
+    ]
+    assert analysis.conversation_act == "provide_information"
+    assert analysis.active_goal_relation == "continue"
+    request = responses.requests[0]
+    assert "every explicitly supplied or corrected" in request["instructions"]
+    assert "two hundred" in request["instructions"]
 
 
 def test_non_reasoning_openai_model_omits_reasoning_parameter():
@@ -125,7 +171,7 @@ def test_openai_error_preserves_safe_api_diagnostics_and_redacts_key(runtime_fac
     provider = _provider(_FakeResponses(error=_ApiError("unsafe sk-other-secret")))
 
     with pytest.raises(ProviderError) as caught:
-        provider.analyze_message("hello", runtime.catalog.list(), {})
+        provider.understand_turn("hello", runtime.catalog.list(), {})
 
     assert caught.value.status_code == 400
     assert caught.value.error_code == "unsupported_parameter"

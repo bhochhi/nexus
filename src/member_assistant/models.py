@@ -72,7 +72,13 @@ class WorkflowState(TypedDict, total=False):
     reply: str
     audit_events: List[Dict[str, Any]]
     catalog_revision: int
+    slot_updates: Dict[str, Any]
+    conversation_act: str
+    active_goal_relation: str
     slot_attempted: bool
+    slot_inputs_before: Dict[str, Any]
+    slot_update_fields: List[str]
+    slot_correction: bool
 
 
 def new_conversation_state() -> ConversationState:

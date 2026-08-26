@@ -5,7 +5,14 @@ import re
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from member_assistant.catalog import SkillRoutingDefinition
-from .base import GoalAnalysis, GoalMatch, ModelProvider, ProviderError, SkillGap
+from .base import (
+    GoalMatch,
+    ModelProvider,
+    ProviderError,
+    SkillGap,
+    SlotUpdate,
+    TurnAnalysis,
+)
 
 
 class OpenAIProvider(ModelProvider):
@@ -101,33 +108,57 @@ class OpenAIProvider(ModelProvider):
         catalog: Sequence[SkillRoutingDefinition],
         context: Optional[Mapping[str, Any]] = None,
     ) -> List[GoalMatch]:
-        return self.analyze_message(message, catalog, context).goals
+        return self.understand_turn(message, catalog, context).goals
 
-    def analyze_message(
+    def understand_turn(
         self,
         message: str,
         catalog: Sequence[SkillRoutingDefinition],
         context: Optional[Mapping[str, Any]] = None,
-    ) -> GoalAnalysis:
+    ) -> TurnAnalysis:
         choices = [
             {
                 "skill_name": skill.name,
                 "description": skill.description,
-                "goals": [goal["name"] for goal in skill.supported_goals],
-                "input_properties": list(skill.input_schema.get("properties", {}).keys()),
+                "goals": [
+                    {
+                        "name": goal["name"],
+                        "display_name": goal.get("display_name", goal["name"]),
+                    }
+                    for goal in skill.supported_goals
+                ],
+                "input_schema": skill.input_schema,
             }
             for skill in catalog
         ]
         instruction = (
-            "Understand the member's objectives. Return JSON only as "
+            "Understand the member's complete conversational turn. Return JSON only as "
             "{\"goals\":[{\"skill_name\":str,\"goal\":str,\"confidence\":number,"
-            "\"inputs\":object}],\"skill_gap\":null|{\"objective\":str,\"category\":str,"
-            "\"confidence\":number}}. Use only the supplied skills for goals. Do not infer "
-            "financial data. An empty goals list is valid. Omit candidates with no evidence; "
+            "\"inputs\":object}],\"slot_updates\":[{\"field\":str,\"value\":any,"
+            "\"confidence\":number}],\"conversation_act\":str,"
+            "\"active_goal_relation\":str,\"skill_gap\":null|{\"objective\":str,"
+            "\"category\":str,\"confidence\":number}}. Use only the supplied skills for "
+            "goals. Do not infer "
+            "financial data. Each returned goal must exactly equal one supplied "
+            "goals[].name value; never return its display_name. An empty goals list is "
+            "valid. Omit candidates with no evidence; "
             "never return zero-confidence placeholders. If conversation_context says the "
-            "assistant is awaiting an input, a plausible answer to that question is not a new "
-            "goal or skill gap. Return multiple goals only when the member independently "
+            "assistant has an active task, interpret the utterance relative to that task. Put "
+            "every explicitly supplied or corrected active-task input in slot_updates, even "
+            "when more than one value appears and even when a different field was asked for. "
+            "Use only fields from the active skill's input_schema. Distinguish source and "
+            "destination using the member's wording. Normalize an unambiguous monetary amount "
+            "written in words to a plain decimal-number string, such as 'two hundred' to "
+            "'200.00'. Never treat a masked account suffix or identifier as an amount unless "
+            "the member explicitly describes it as money. Give each slot update a calibrated "
+            "confidence from 0 to 1. Do not guess an ambiguous value. A plausible task answer "
+            "is not a new goal or skill gap. Put inputs on a goal candidate only for a newly "
+            "requested goal. "
+            "Return multiple goals only when the member independently "
             "requested each goal or when the utterance is genuinely ambiguous between them. "
+            "conversation_act must be one of provide_information, correction, confirmation, "
+            "new_goal, clarification_request, greeting, small_talk, or unknown. "
+            "active_goal_relation must be continue, replace, ambiguous, or none. "
             "Set skill_gap only when the member expresses a clear objective that none of the "
             "supplied skills supports. Do not use skill_gap for greetings, small talk, unclear "
             "fragments, or plausible slot answers. Write objective as a short sanitized verb "
@@ -148,20 +179,81 @@ class OpenAIProvider(ModelProvider):
                     }
                 ),
             )
-            self._capture_usage(response, "analyze_message")
+            self._capture_usage(response, "understand_turn")
             content = response.output_text or "{}"
             parsed = json.loads(content)
-            allowed = {skill.name for skill in catalog}
-            goals = [
-                GoalMatch(
-                    skill_name=item["skill_name"],
-                    goal=item["goal"],
-                    confidence=float(item.get("confidence", 0.0)),
-                    inputs=dict(item.get("inputs", {})),
+            skills_by_name = {skill.name: skill for skill in catalog}
+            goals = []
+            for item in parsed.get("goals", []):
+                if not isinstance(item, dict):
+                    continue
+                skill = skills_by_name.get(str(item.get("skill_name", "")))
+                if skill is None:
+                    continue
+                allowed_inputs = set(
+                    skill.input_schema.get("properties", {}).keys()
                 )
-                for item in parsed.get("goals", [])
-                if item.get("skill_name") in allowed
-            ]
+                inputs = item.get("inputs", {})
+                goals.append(
+                    GoalMatch(
+                        skill_name=skill.name,
+                        goal=str(item.get("goal", "")),
+                        confidence=float(item.get("confidence", 0.0)),
+                        inputs={
+                            str(key): value
+                            for key, value in (
+                                inputs.items() if isinstance(inputs, dict) else []
+                            )
+                            if key in allowed_inputs
+                            and value is not None
+                            and value != ""
+                        },
+                    )
+                )
+            context_value = dict(context or {})
+            active = skills_by_name.get(str(context_value.get("active_skill") or ""))
+            active_fields = (
+                set(active.input_schema.get("properties", {}).keys())
+                if active
+                else set()
+            )
+            slot_updates = []
+            for item in parsed.get("slot_updates", []):
+                if not isinstance(item, dict):
+                    continue
+                field_name = str(item.get("field", ""))
+                value = item.get("value")
+                if field_name not in active_fields or value is None or value == "":
+                    continue
+                slot_updates.append(
+                    SlotUpdate(
+                        field=field_name,
+                        value=value,
+                        confidence=max(
+                            0.0, min(1.0, float(item.get("confidence", 0.0)))
+                        ),
+                    )
+                )
+            allowed_acts = {
+                "provide_information",
+                "correction",
+                "confirmation",
+                "new_goal",
+                "clarification_request",
+                "greeting",
+                "small_talk",
+                "unknown",
+            }
+            conversation_act = (
+                str(parsed.get("conversation_act", "unknown")).strip().casefold()
+            )
+            if conversation_act not in allowed_acts:
+                conversation_act = "unknown"
+            active_goal_relation = (
+                str(parsed.get("active_goal_relation", "none")).strip().casefold()
+            )
+            if active_goal_relation not in {"continue", "replace", "ambiguous", "none"}:
+                active_goal_relation = "none"
             raw_gap = parsed.get("skill_gap")
             skill_gap = None
             if isinstance(raw_gap, dict):
@@ -178,11 +270,17 @@ class OpenAIProvider(ModelProvider):
                         category=category[:80],
                         confidence=max(0.0, min(1.0, confidence)),
                     )
-            return GoalAnalysis(goals=goals, skill_gap=skill_gap)
+            return TurnAnalysis(
+                goals=goals,
+                skill_gap=skill_gap,
+                slot_updates=slot_updates,
+                conversation_act=conversation_act,
+                active_goal_relation=active_goal_relation,
+            )
         except Exception as exc:
             if isinstance(exc, ProviderError):
                 raise
-            raise self._safe_provider_error("goal extraction", exc) from exc
+            raise self._safe_provider_error("turn understanding", exc) from exc
 
     def generate_response(self, instruction: str, facts: Dict[str, Any]) -> str:
         try:

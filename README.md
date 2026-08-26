@@ -68,17 +68,25 @@ member-assistant --db data/demo.db --session-ttl-minutes 10
 The default `MODEL_PROVIDER` is `openai`, and the default model is `gpt-5.6-luna`. The OpenAI adapter uses the Responses API with `MODEL_REASONING_EFFORT=low`; it does not send legacy `temperature` options. Configure `OPENAI_API_KEY` in `~/.secrets/dev.env`. If no key is present—or the provider fails—and `ALLOW_PROVIDER_FALLBACK=true` (the template default), the runtime safely uses deterministic catalog routing. Set `ALLOW_PROVIDER_FALLBACK=false` to require the configured provider and expose API failures directly in the CLI. To use a different user-secret file, export `MEMBER_ASSISTANT_ENV_FILE=/path/to/file`; the project `.env` remains the lower-priority local configuration source. The repository's `.env.example` contains no secret and is never read at runtime.
 
 
-Useful CLI commands are `/skills`, `/state`, `/trace`, `/add-online-id`, and `/quit`.
+Useful CLI commands are `/skills`, `/state`, `/trace`, `/add-online-id`,
+`/remove-online-id`, and `/quit`.
 
 ## Conversation behavior
 
-Goal understanding runs for every member utterance, with the active task,
-missing field, pending question, and resume state supplied as context to the
-provider. The runtime then applies deterministic conversation controls:
+Semantic turn understanding runs for every member utterance, with the active
+task, current inputs, full input schema, missing field, pending question, and
+resume state supplied as context to the provider. One result can identify a new
+goal, interpret several active-task inputs, recognize a correction, or report
+ambiguity. The runtime accepts only schema-declared slot values above its
+confidence threshold, then applies deterministic conversation controls:
 
-- A plausible answer to a requested slot is collected and validated before it
-  is treated as a new task. Natural mock-account references such as `checking
-  in 1001` and `saving 2002` are normalized.
+- A member can answer more than the field just requested. For example, “from
+  saving to checking” supplies both transfer accounts, and “two hundred” can be
+  normalized to `200.00`. Mock account tools and schema validators still verify
+  those interpretations before the workflow advances.
+- A correction made at confirmation invalidates the previous review, restarts
+  deterministic validation with the corrected values, and presents a new
+  review. It never edits an already-confirmed submission.
 - A clear different goal pauses current work. After the interrupting goal is
   served, the member is asked whether to resume or discard the paused goal.
 - Close alternative goal candidates produce a durable disambiguation question.
@@ -97,10 +105,13 @@ provider. The runtime then applies deterministic conversation controls:
   yes; the existing declarative handoff skill then receives the active goal and
   completed-step context.
 
-The LLM supplies structured goal candidates and extracted inputs, but does not
-choose policy outcomes or execute consequential tools. Strong catalog keyword
-matches are merged with model output so an explicit phrase such as “live agent”
-cannot be lost because of an invalid model confidence score.
+The LLM supplies structured goal candidates, field-level slot interpretations
+with confidence, and the conversational relationship to the active goal. It
+does not choose policy outcomes, declare inputs valid, order workflow steps, or
+execute tools. Strong catalog keyword matches are merged with model output so an
+explicit phrase such as “live agent” cannot be lost because of an invalid model
+confidence score. The deterministic fallback deliberately performs narrower
+single-field extraction rather than pretending to be a production NLU system.
 
 The same understanding result can contain a `skill_gap` when the member has a
 clear objective but no installed skill supports it. The assistant acknowledges
@@ -120,7 +131,7 @@ sqlite3 data/demo.db "SELECT json_extract(payload_json, '$.category') AS categor
 
 ## Logging and tracing
 
-The runtime emits one trace for each member turn, with nested observations for state loading and persistence, LangGraph nodes, goal detection, skill-gap detection, planning, policy evaluation, skill execution, declarative workflow steps, mock tools, grounded model responses, confirmation, and outcomes. Newly published declarative skills receive the same tracing automatically.
+The runtime emits one trace for each member turn, with nested observations for state loading and persistence, semantic turn understanding, skill-gap detection, planning, policy evaluation, skill execution, declarative workflow steps, mock tools, grounded model responses, confirmation, and outcomes. Newly published declarative skills receive the same tracing automatically.
 
 Console tracing is enabled by default. Interactive runs use compact, color-coded output for the important LLM, policy, skill, tool, and turn observations. It records decision evidence such as goal candidates and confidence, selected skill and version, risk tier, policy result, model/provider and fallback status, tool outcome, latency, and OpenAI token usage when available. It does not record hidden model reasoning. Set `TRACE_CONSOLE_FORMAT=json` or pass `--trace-format json` when machine-readable JSON lines are needed; `--log-level DEBUG` also displays lower-level graph and state spans in pretty mode.
 
@@ -134,7 +145,7 @@ milliseconds.
 | Output | Meaning |
 | --- | --- |
 | `HTTP Request ... 200 OK` | OpenAI SDK HTTP logging. It confirms that OpenAI accepted the request; it is not a Langfuse export message. |
-| `LLM llm.goal_detection` | The model analyzed the utterance for supported goals, extracted inputs, ambiguity, or a skill gap. It did not execute the goal. |
+| `LLM llm.turn_understanding` | The model interpreted supported goals, all active-task slot updates, corrections, ambiguity, or a skill gap. It did not validate data or execute the goal. |
 | `POLICY policy.evaluate` | Deterministic authentication, authorization, risk, and confirmation controls evaluated the selected skill. |
 | `TOOL tool.<name>` | A typed integration was called. Every integration in this POC is mock/local even when its name describes accounts, transfers, or a live agent. |
 | `SKILL skill.<name>` | The declarative skill workflow completed its current pass. It may have asked for missing input, paused for confirmation, or produced an outcome. |
@@ -151,6 +162,12 @@ Common metadata fields are:
 | `reasoning=low` | Configured reasoning effort. This is a setting, not hidden reasoning text; chain-of-thought is not logged. |
 | `fallback=no` | The configured provider succeeded. `fallback=yes` means the deterministic availability provider handled that operation. |
 | `in_tokens` / `out_tokens` | Tokens sent to and returned by the model for this call. |
+| `goal_aliases` | Number of model-returned friendly goal labels safely normalized to catalog goal IDs. It appears only when nonzero. |
+| `invalid_goals` | Number of undeclared model-returned goals rejected before routing. It appears only when nonzero. |
+| `act` | The interpreted conversational act, such as `provide_information`, `correction`, or `new_goal`. |
+| `relation` | Whether the utterance continues, replaces, or is ambiguous relative to the active goal. |
+| `slots` | Schema-declared active-task fields understood from this utterance. Values remain redacted from the compact trace. |
+| `invalid_slots` | Low-confidence or schema-invalid slot interpretations rejected before task state changed. It appears only when nonzero. |
 | `skill` | The catalog skill selected for policy or execution. |
 | `version` / `artifact` | The selected immutable semantic version and the first 12 characters of its content hash. Langfuse and JSON traces retain the full `skill_artifact_hash`. |
 | `risk_tier` | Governance category: `informational`, `navigation`, `read_only`, `consequential`, or `handoff`. It controls policy handling; it is not a model confidence score. |
@@ -262,7 +279,7 @@ member> /remove-online-id
 ```
 
 `/add-online-id` compiles and publishes
-`skills/available/online_id/SKILL.md` as an immutable artifact, then atomically
+`skills/available/online_id_recovery/SKILL.md` as an immutable artifact, then atomically
 updates the active routing index. The catalog notices it without restarting,
 and the already-compiled graph routes through its generic execution node. New
 tasks use the newly active version; tasks already waiting for clarification,
@@ -285,8 +302,8 @@ workflow, and acceptance scenarios. Publication stores that same source as
 metadata and active-version pointers.
 
 ```bash
-member-assistant-skills validate skills/available/online_id/SKILL.md
-member-assistant-skills publish skills/available/online_id/SKILL.md
+member-assistant-skills validate skills/available/online_id_recovery/SKILL.md
+member-assistant-skills publish skills/available/online_id_recovery/SKILL.md
 member-assistant-skills active
 member-assistant-skills versions --name online_id_recovery
 member-assistant-skills deactivate online_id_recovery
