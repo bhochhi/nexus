@@ -9,7 +9,11 @@ import uuid
 
 from langgraph.graph import END, START, StateGraph
 
-from member_assistant.catalog import SkillCatalog, SkillDefinition
+from member_assistant.catalog import (
+    SkillCatalog,
+    SkillDefinition,
+    SkillRoutingDefinition,
+)
 from member_assistant.config import Settings
 from member_assistant.models import ConversationState, TaskState, WorkflowState
 from member_assistant.observability import Observability, build_observability
@@ -292,7 +296,9 @@ class AgentRuntime:
             conversation["selected_skill"] = None
             conversation["outcome"] = None
             conversation["confirmation_status"] = "not_required"
-        catalog = self.catalog.list()
+        # Goal understanding needs only the small, hot-reloadable routing index. The
+        # full immutable artifact is loaded after a goal has been selected.
+        catalog = self.catalog.routes()
         active = conversation.get("active_task")
         goal_context = {
             "active_skill": active.get("skill_name") if active else None,
@@ -579,7 +585,7 @@ class AgentRuntime:
         updates: Dict[str, Any],
         state: WorkflowState,
         skill_gap: SkillGap,
-        catalog: List[SkillDefinition],
+        catalog: List[SkillRoutingDefinition],
         provider_metadata: Dict[str, Any],
     ) -> None:
         payload = {
@@ -635,8 +641,8 @@ class AgentRuntime:
     def _plan_goals(self, state: WorkflowState) -> Dict[str, Any]:
         conversation = state["conversation"]
         goals = state.get("goals", [])
-        definitions = {skill.name: skill for skill in self.catalog.list()}
-        valid_goals = [goal for goal in goals if goal["skill_name"] in definitions]
+        routes = {skill.name: skill for skill in self.catalog.routes()}
+        valid_goals = [goal for goal in goals if goal["skill_name"] in routes]
         if not valid_goals:
             return {
                 "conversation": conversation,
@@ -657,7 +663,7 @@ class AgentRuntime:
             (
                 goal
                 for goal in valid_goals
-                if definitions[goal["skill_name"]].risk_tier == "handoff"
+                if routes[goal["skill_name"]].risk_tier == "handoff"
             ),
             None,
         )
@@ -682,9 +688,24 @@ class AgentRuntime:
             )
 
         valid_goals.sort(
-            key=lambda goal: RISK_ORDER[definitions[goal["skill_name"]].risk_tier]
+            key=lambda goal: RISK_ORDER[routes[goal["skill_name"]].risk_tier]
         )
-        tasks = [self._task_from_goal(goal, definitions[goal["skill_name"]]) for goal in valid_goals]
+        tasks = []
+        for goal in valid_goals:
+            route = routes[goal["skill_name"]]
+            definition = self.catalog.get(
+                route.name, route.version, route.artifact_hash
+            )
+            if definition is not None:
+                tasks.append(self._task_from_goal(goal, definition))
+        if not tasks:
+            return {
+                "conversation": conversation,
+                "response_parts": [
+                    "That capability could not be loaded safely; no action was taken."
+                ],
+                "next_action": "finalize",
+            }
         conversation["active_task"] = tasks[0]
         conversation["queued_tasks"] = tasks[1:]
         return {"conversation": conversation, "next_action": "policy"}
@@ -697,7 +718,7 @@ class AgentRuntime:
                 "conversation": conversation,
                 "response_parts": ["There is no active task awaiting information."],
             }
-        definition = self.catalog.get(task["skill_name"])
+        definition = self._task_definition(task)
         executor = self.executors.get(definition.skill_type) if definition else None
         if not definition or not executor:
             task["status"] = "failed"
@@ -807,7 +828,7 @@ class AgentRuntime:
         task = conversation.get("active_task")
         if not task:
             return {"conversation": conversation, "next_action": "finalize"}
-        definition = self.catalog.get(task["skill_name"])
+        definition = self._task_definition(task)
         executor = self.executors.get(definition.skill_type) if definition else None
         if not definition or not executor:
             task["status"] = "failed"
@@ -824,6 +845,7 @@ class AgentRuntime:
             metadata={
                 "skill": definition.name,
                 "skill_version": definition.version,
+                "skill_artifact_hash": definition.artifact_hash,
                 "risk_tier": definition.risk_tier,
                 "task_status": task["status"],
                 "confirmation_status": conversation["confirmation_status"],
@@ -837,6 +859,11 @@ class AgentRuntime:
                 authorizations=self.authorizations,
                 task_status=task["status"],
                 confirmation_status=conversation["confirmation_status"],
+                dependencies_available=all(
+                    self.tools.supports(str(step["tool"]), str(step["action"]))
+                    for step in definition.workflow.get("steps", [])
+                    if step.get("op") == "call_tool"
+                ),
             )
             policy_observation.update(
                 output={"allowed": decision.allowed, "decision": decision.event}
@@ -847,6 +874,7 @@ class AgentRuntime:
                 "payload": {
                     "skill": definition.name,
                     "skill_version": definition.version,
+                    "skill_artifact_hash": definition.artifact_hash,
                     "risk_tier": definition.risk_tier,
                     "allowed": decision.allowed,
                 },
@@ -879,7 +907,7 @@ class AgentRuntime:
         task = conversation["active_task"]
         if task is None:
             return {"conversation": conversation}
-        definition = self.catalog.get(task["skill_name"])
+        definition = self._task_definition(task)
         executor = self.executors.get(definition.skill_type) if definition else None
         if not definition or not executor:
             task["status"] = "failed"
@@ -898,6 +926,7 @@ class AgentRuntime:
                 metadata={
                     "skill": definition.name,
                     "skill_version": definition.version,
+                    "skill_artifact_hash": definition.artifact_hash,
                     "skill_type": definition.skill_type,
                     "risk_tier": definition.risk_tier,
                     "goal": task["goal"],
@@ -971,6 +1000,7 @@ class AgentRuntime:
             "payload": {
                 "skill": definition.name,
                 "skill_version": definition.version,
+                "skill_artifact_hash": definition.artifact_hash,
                 "status": result.status,
                 "tools": list(executor.required_tools(definition)),
             },
@@ -1003,7 +1033,7 @@ class AgentRuntime:
 
         completed_was_handoff = False
         if task:
-            definition = self.catalog.get(task["skill_name"])
+            definition = self._task_definition(task)
             completed_was_handoff = bool(definition and definition.risk_tier == "handoff")
             conversation["active_task"] = None
 
@@ -1065,6 +1095,7 @@ class AgentRuntime:
             "id": str(uuid.uuid4()),
             "skill_name": definition.name,
             "skill_version": definition.version,
+            "skill_artifact_hash": definition.artifact_hash,
             "goal": goal["goal"],
             "status": "ready",
             "inputs": dict(goal.get("inputs", {})),
@@ -1117,7 +1148,7 @@ class AgentRuntime:
         goals: List[Dict[str, Any]],
         deterministic_goals: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        catalog = self.catalog.list()
+        catalog = self.catalog.routes()
         goals = [goal for goal in goals if not self._is_handoff_goal(goal, catalog)]
         if not goals:
             updates.update(goals=[], next_action="finalize")
@@ -1284,7 +1315,7 @@ class AgentRuntime:
 
     @staticmethod
     def _handoff_goal(
-        catalog: List[SkillDefinition], offer: Dict[str, Any]
+        catalog: List[SkillRoutingDefinition], offer: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
         definition = next((item for item in catalog if item.risk_tier == "handoff"), None)
         if not definition:
@@ -1301,7 +1332,9 @@ class AgentRuntime:
         }
 
     @staticmethod
-    def _is_handoff_goal(goal: Dict[str, Any], catalog: List[SkillDefinition]) -> bool:
+    def _is_handoff_goal(
+        goal: Dict[str, Any], catalog: List[SkillRoutingDefinition]
+    ) -> bool:
         definition = next(
             (item for item in catalog if item.name == goal.get("skill_name")), None
         )
@@ -1337,7 +1370,7 @@ class AgentRuntime:
     def _reception_response(
         self,
         conversation: ConversationState,
-        catalog: List[SkillDefinition],
+        catalog: List[SkillRoutingDefinition],
     ) -> str:
         name = conversation.get("member_profile", {}).get("preferred_name", "Member")
         capabilities = self._member_capability_list(catalog)
@@ -1355,7 +1388,7 @@ class AgentRuntime:
         self,
         conversation: ConversationState,
         message: str,
-        catalog: List[SkillDefinition],
+        catalog: List[SkillRoutingDefinition],
     ) -> str:
         name = conversation.get("member_profile", {}).get("preferred_name", "Member")
         capabilities = self._member_capability_list(catalog)
@@ -1429,7 +1462,7 @@ class AgentRuntime:
         return response
 
     def _member_capability_list(
-        self, catalog: List[SkillDefinition]
+        self, catalog: List[SkillRoutingDefinition]
     ) -> List[str]:
         labels: List[str] = []
         for skill in catalog:
@@ -1487,7 +1520,9 @@ class AgentRuntime:
         return bool(re.search(r"\b(and|also|then|as well as)\b", message.casefold()))
 
     def _goal_label(self, skill_name: str, goal_name: str) -> str:
-        definition = self.catalog.get(skill_name)
+        definition = next(
+            (route for route in self.catalog.routes() if route.name == skill_name), None
+        )
         if definition:
             goal = next(
                 (
@@ -1502,7 +1537,7 @@ class AgentRuntime:
         return goal_name.replace("_", " ")
 
     def _confirmation_copy(self, task: TaskState, key: str, default: str) -> str:
-        definition = self.catalog.get(task["skill_name"])
+        definition = self._task_definition(task)
         if not definition:
             return default
         step_index = int(task.get("workflow_step", 0))
@@ -1510,6 +1545,28 @@ class AgentRuntime:
         if step_index < len(steps) and steps[step_index].get("op") == "confirm":
             return str(steps[step_index].get(key, default))
         return default
+
+    def _task_definition(self, task: TaskState) -> Optional[SkillDefinition]:
+        """Resolve the immutable artifact originally selected for a durable task.
+
+        Older persisted POC sessions do not contain an artifact hash, so they fall
+        back to an exact version (when unambiguous) and finally the active version.
+        New tasks always store the content hash and cannot silently change behavior
+        when a newer skill is published.
+        """
+
+        name = task["skill_name"]
+        version = task.get("skill_version")
+        artifact_hash = task.get("skill_artifact_hash")
+        if version and artifact_hash:
+            # Never substitute a different artifact for a hash-pinned task. If
+            # retention is broken, fail closed instead of changing behavior.
+            return self.catalog.get(name, version, artifact_hash)
+        if version:
+            definition = self.catalog.get(name, version=version)
+            if definition is not None:
+                return definition
+        return self.catalog.get(name)
 
     @staticmethod
     def _is_affirmative(message: str, resume_words: bool = False) -> bool:

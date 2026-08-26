@@ -29,6 +29,7 @@ class TransferReceipt:
 
 class MockTransferTool:
     name = "mock_internal_transfer"
+    actions = ("submit",)
 
     def __init__(self, accounts: MockAccountTool):
         self.accounts = accounts

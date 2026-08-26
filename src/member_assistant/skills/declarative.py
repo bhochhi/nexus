@@ -30,6 +30,7 @@ class DeclarativeSkillExecutor(SkillExecutor):
                 metadata={
                     "skill": context.definition.name,
                     "skill_version": context.definition.version,
+                    "skill_artifact_hash": context.definition.artifact_hash,
                     "risk_tier": context.definition.risk_tier,
                     "step_index": step_index,
                     "operation": operation,

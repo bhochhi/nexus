@@ -21,6 +21,7 @@ class AccountBalance:
 
 class MockAccountTool:
     name = "mock_accounts"
+    actions = ("list_eligible_balances", "resolve_account")
 
     def __init__(self):
         self._accounts = [

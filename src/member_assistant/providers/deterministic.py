@@ -3,7 +3,7 @@
 import re
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
-from member_assistant.catalog import SkillDefinition
+from member_assistant.catalog import SkillRoutingDefinition
 from .base import GoalMatch, ModelProvider
 
 
@@ -35,7 +35,7 @@ class DeterministicProvider(ModelProvider):
     def identify_goals(
         self,
         message: str,
-        catalog: Sequence[SkillDefinition],
+        catalog: Sequence[SkillRoutingDefinition],
         context: Optional[Mapping[str, Any]] = None,
     ) -> List[GoalMatch]:
         normalized = " ".join(message.lower().replace("’", "'").split())
@@ -77,7 +77,9 @@ class DeterministicProvider(ModelProvider):
         except (KeyError, ValueError):
             return str(instruction)
 
-    def _extract_inputs(self, skill: SkillDefinition, message: str) -> Dict[str, Any]:
+    def _extract_inputs(
+        self, skill: SkillRoutingDefinition, message: str
+    ) -> Dict[str, Any]:
         normalized = message.lower()
         inputs: Dict[str, Any] = {}
         for field_name, rule in skill.input_extraction.items():

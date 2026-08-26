@@ -105,6 +105,8 @@ def _pretty_console_event(event: Mapping[str, Any], color: bool = False) -> str:
         "fallback_used": "fallback",
         "fallback_reason": "reason",
         "selected_skill": "skill",
+        "skill_version": "version",
+        "skill_artifact_hash": "artifact",
         "outcome_status": "outcome",
         "confirmation_status": "confirmation",
         "goal_clarification_pending": "goal_clarification",
@@ -136,6 +138,8 @@ def _pretty_console_event(event: Mapping[str, Any], color: bool = False) -> str:
         "goals",
         "skill",
         "selected_skill",
+        "skill_version",
+        "skill_artifact_hash",
         "risk_tier",
         "decision",
         "policy_result",
@@ -159,7 +163,12 @@ def _pretty_console_event(event: Mapping[str, Any], color: bool = False) -> str:
         if label in seen_labels:
             continue
         seen_labels.add(label)
-        fields.append("{}={}".format(label, _compact_value(value)))
+        compact = (
+            str(value)[:12]
+            if key == "skill_artifact_hash"
+            else _compact_value(value)
+        )
+        fields.append("{}={}".format(label, compact))
 
     duration = event.get("duration_ms")
     suffix = " | ".join(fields)

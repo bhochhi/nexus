@@ -171,7 +171,9 @@ def test_reception_only_advertises_currently_installed_skills(runtime_factory):
     before = runtime.chat("before-install", "hello")
     assert "recover your online ID" not in before.text
 
-    runtime.catalog.install(PROJECT_ROOT / "skills" / "available" / "online_id.json")
+    runtime.catalog.install(
+        PROJECT_ROOT / "skills" / "available" / "online_id" / "SKILL.md"
+    )
 
     after = runtime.chat("after-install", "hello")
     assert "recover your online ID" in after.text
@@ -221,7 +223,9 @@ def test_skill_gap_during_slot_collection_preserves_the_active_goal(runtime_fact
 
 def test_installed_skill_is_not_reported_as_a_gap(runtime_factory):
     runtime = runtime_factory(provider=_GapAwareProvider())
-    runtime.catalog.install(PROJECT_ROOT / "skills" / "available" / "online_id.json")
+    runtime.catalog.install(
+        PROJECT_ROOT / "skills" / "available" / "online_id" / "SKILL.md"
+    )
 
     reply = runtime.chat("gap-closed", "recover my online id")
 

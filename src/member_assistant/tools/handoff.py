@@ -22,6 +22,7 @@ class HandoffReceipt:
 
 class MockHandoffTool:
     name = "mock_live_agent"
+    actions = ("create",)
 
     def create(self, request: HandoffRequest) -> HandoffReceipt:
         summary = "Goal: {}. Completed: {}. Reason: {}.".format(

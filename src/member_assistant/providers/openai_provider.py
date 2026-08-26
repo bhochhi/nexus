@@ -4,7 +4,7 @@ import json
 import re
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
-from member_assistant.catalog import SkillDefinition
+from member_assistant.catalog import SkillRoutingDefinition
 from .base import GoalAnalysis, GoalMatch, ModelProvider, ProviderError, SkillGap
 
 
@@ -98,7 +98,7 @@ class OpenAIProvider(ModelProvider):
     def identify_goals(
         self,
         message: str,
-        catalog: Sequence[SkillDefinition],
+        catalog: Sequence[SkillRoutingDefinition],
         context: Optional[Mapping[str, Any]] = None,
     ) -> List[GoalMatch]:
         return self.analyze_message(message, catalog, context).goals
@@ -106,7 +106,7 @@ class OpenAIProvider(ModelProvider):
     def analyze_message(
         self,
         message: str,
-        catalog: Sequence[SkillDefinition],
+        catalog: Sequence[SkillRoutingDefinition],
         context: Optional[Mapping[str, Any]] = None,
     ) -> GoalAnalysis:
         choices = [

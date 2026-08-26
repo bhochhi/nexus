@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
-from member_assistant.catalog import SkillDefinition
+from member_assistant.catalog import SkillRoutingDefinition
 from member_assistant.config import Settings
 from .base import GoalAnalysis, GoalMatch, ModelProvider, ProviderError
 from .deterministic import DeterministicProvider
@@ -29,7 +29,7 @@ class FallbackProvider(ModelProvider):
     def identify_goals(
         self,
         message: str,
-        catalog: Sequence[SkillDefinition],
+        catalog: Sequence[SkillRoutingDefinition],
         context: Optional[Mapping[str, Any]] = None,
     ) -> List[GoalMatch]:
         try:
@@ -49,7 +49,7 @@ class FallbackProvider(ModelProvider):
     def analyze_message(
         self,
         message: str,
-        catalog: Sequence[SkillDefinition],
+        catalog: Sequence[SkillRoutingDefinition],
         context: Optional[Mapping[str, Any]] = None,
     ) -> GoalAnalysis:
         try:

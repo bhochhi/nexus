@@ -22,9 +22,16 @@ class PolicyEngine:
         authorizations: List[str],
         task_status: str,
         confirmation_status: str,
+        dependencies_available: bool = True,
     ) -> PolicyDecision:
         if any(tool not in definition.allowed_tools for tool in required_tools):
             return PolicyDecision(False, "Skill is not approved to call its tool.", "tool_denied")
+        if not dependencies_available:
+            return PolicyDecision(
+                False,
+                "A required integration is not available; no action was taken.",
+                "tool_unavailable",
+            )
         if definition.auth_required and not authenticated:
             return PolicyDecision(
                 False,

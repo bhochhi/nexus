@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
-from member_assistant.catalog import SkillDefinition
+from member_assistant.catalog import SkillRoutingDefinition
 
 
 class ProviderError(RuntimeError):
@@ -100,7 +100,7 @@ class ModelProvider(ABC):
     def analyze_message(
         self,
         message: str,
-        catalog: Sequence[SkillDefinition],
+        catalog: Sequence[SkillRoutingDefinition],
         context: Optional[Mapping[str, Any]] = None,
     ) -> GoalAnalysis:
         """Understand supported goals and optional gaps in one provider operation.
@@ -116,7 +116,7 @@ class ModelProvider(ABC):
     def identify_goals(
         self,
         message: str,
-        catalog: Sequence[SkillDefinition],
+        catalog: Sequence[SkillRoutingDefinition],
         context: Optional[Mapping[str, Any]] = None,
     ) -> List[GoalMatch]:
         raise NotImplementedError

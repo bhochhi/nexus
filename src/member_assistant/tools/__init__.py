@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 from .accounts import MockAccountTool
 from .handoff import MockHandoffTool
@@ -42,6 +42,18 @@ class MockTools:
 
     def has(self, tool_name: str) -> bool:
         return tool_name in self._registry
+
+    def supports(self, tool_name: str, action: str) -> bool:
+        tool = self._registry.get(tool_name)
+        return bool(tool and action in getattr(tool, "actions", ()))
+
+    def contracts(self) -> Dict[str, Tuple[str, ...]]:
+        """Return the stable dependency manifest exposed to skill publishers."""
+
+        return {
+            name: tuple(getattr(tool, "actions", ()))
+            for name, tool in sorted(self._registry.items())
+        }
 
     @classmethod
     def create(cls, knowledge_path: Path) -> "MockTools":

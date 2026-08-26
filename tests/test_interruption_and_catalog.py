@@ -5,7 +5,7 @@ from member_assistant.config import PROJECT_ROOT
 
 
 def _install_navigation(runtime):
-    source = PROJECT_ROOT / "skills" / "available" / "online_id.json"
+    source = PROJECT_ROOT / "skills" / "available" / "online_id" / "SKILL.md"
     return runtime.catalog.install(source)
 
 
@@ -56,16 +56,17 @@ def test_interruption_can_be_discarded(runtime_factory):
 
 def test_invalid_hot_edit_retains_last_valid_skill(runtime_factory):
     runtime = runtime_factory()
-    installed = _install_navigation(runtime)
+    _install_navigation(runtime)
     valid = runtime.catalog.get("online_id_recovery")
     assert valid is not None
 
-    installed.write_text("{not valid json", encoding="utf-8")
+    index = runtime.catalog.directory / "_registry" / "active.json"
+    index.write_text("{not valid json", encoding="utf-8")
     runtime.catalog.refresh(force=True)
 
     retained = runtime.catalog.get("online_id_recovery")
     assert retained == valid
-    assert installed.name in runtime.catalog.errors
+    assert "_registry/active.json" in runtime.catalog.errors
 
 
 def test_new_invalid_file_does_not_replace_catalog(runtime_factory):

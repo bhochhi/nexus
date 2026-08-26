@@ -38,6 +38,7 @@ class TaskState(TypedDict, total=False):
     pending_question: Optional[str]
     outcome: Optional[Dict[str, Any]]
     skill_version: str
+    skill_artifact_hash: str
     workflow_step: int
     variables: Dict[str, Any]
 

@@ -1,8 +1,10 @@
+import json
 from types import SimpleNamespace
 
 from member_assistant.cli import _provider_line
-from member_assistant.config import Settings
+from member_assistant.config import PROJECT_ROOT, Settings
 from member_assistant.providers import DeterministicProvider
+from member_assistant.skill_cli import main as skill_main
 
 
 def test_mock_provider_is_not_reported_as_a_fallback():
@@ -48,3 +50,22 @@ def test_openai_responses_endpoint_and_reasoning_are_visible():
     assert "model=gpt-5.6-luna" in line
     assert "endpoint=responses" in line
     assert "reasoning=low" in line
+
+
+def test_skill_cli_validates_publishes_and_lists_active_catalog(tmp_path, capsys):
+    source = (
+        PROJECT_ROOT / "skills" / "available" / "online_id" / "SKILL.md"
+    )
+    catalog = tmp_path / "catalog"
+
+    assert skill_main(["--catalog", str(catalog), "validate", str(source)]) == 0
+    validated = json.loads(capsys.readouterr().out)
+    assert validated["valid"] is True
+
+    assert skill_main(["--catalog", str(catalog), "publish", str(source)]) == 0
+    published = json.loads(capsys.readouterr().out)
+    assert published["activated"] is True
+
+    assert skill_main(["--catalog", str(catalog), "active"]) == 0
+    active = json.loads(capsys.readouterr().out)
+    assert active["skills"][0]["name"] == "online_id_recovery"

@@ -9,14 +9,17 @@ from .declarative import DeclarativeSkillExecutor
 
 class SkillExecutorRegistry:
     def __init__(self, executors: Optional[Iterable[SkillExecutor]] = None):
-        implementations = tuple(executors or (DeclarativeSkillExecutor(),))
+        self._default_executor = DeclarativeSkillExecutor()
+        implementations = tuple(executors or (self._default_executor,))
         self._executors: Dict[str, SkillExecutor] = {}
         for executor in implementations:
             for skill_type in executor.skill_types:
                 self._executors[skill_type] = executor
 
     def get(self, skill_type: str) -> Optional[SkillExecutor]:
-        return self._executors.get(skill_type)
+        # Published archetypes can reuse the governed declarative operation set
+        # without requiring a runtime release.
+        return self._executors.get(skill_type, self._default_executor)
 
     @property
     def supported_types(self):

@@ -18,6 +18,7 @@ class KnowledgeResult:
 
 class LocalKnowledgeTool:
     name = "local_knowledge"
+    actions = ("search",)
     _stop_words = {
         "a",
         "an",

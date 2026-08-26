@@ -6,8 +6,8 @@ A small, runnable financial-services member-assistance proof of concept built wi
 
 - A fixed LangGraph lifecycle for state-aware goal understanding, safe ordering, durable goal/slot clarification, policy checks, generic skill execution, interruption, resumption, confirmation, and confirmed handoff.
 - A provider-neutral `ModelProvider` interface. `MODEL_PROVIDER=openai` and `MODEL_ID=gpt-5.6-luna` are the demo defaults; OpenAI Responses API code is isolated in one adapter. A deterministic provider supports offline demos and tests and is the availability fallback by default.
-- A JSON skill catalog that is polled while the process runs. Valid changes activate without graph recompilation. Invalid edits retain the last-known-good definition.
-- One safe declarative workflow interpreter shared by five reusable execution types: `knowledge`, `guided_resolution`, `deterministic_workflow`, `navigation`, and `human_handoff`.
+- A versioned file catalog that polls a lightweight active routing index. New immutable skill artifacts activate without process restart or graph recompilation; invalid index updates retain the last-known-good catalog.
+- One business-facing `SKILL.md` format that compiles to an internal JSON artifact, plus a safe declarative workflow interpreter shared by built-in and custom authoring archetypes.
 - Approved-knowledge, guided-balance, deterministic internal-transfer, and live-agent skills active at startup. Online-ID recovery is packaged separately for live installation.
 - SQLite conversation snapshots and privacy-safe audit events.
 - Provider-neutral structured tracing with console, in-memory test, and local Langfuse/OpenTelemetry sinks. Content is redacted and session identifiers are hashed by default.
@@ -120,7 +120,7 @@ sqlite3 data/demo.db "SELECT json_extract(payload_json, '$.category') AS categor
 
 ## Logging and tracing
 
-The runtime emits one trace for each member turn, with nested observations for state loading and persistence, LangGraph nodes, goal detection, skill-gap detection, planning, policy evaluation, skill execution, declarative workflow steps, mock tools, grounded model responses, confirmation, and outcomes. New JSON-only skills receive the same tracing automatically.
+The runtime emits one trace for each member turn, with nested observations for state loading and persistence, LangGraph nodes, goal detection, skill-gap detection, planning, policy evaluation, skill execution, declarative workflow steps, mock tools, grounded model responses, confirmation, and outcomes. Newly published declarative skills receive the same tracing automatically.
 
 Console tracing is enabled by default. Interactive runs use compact, color-coded output for the important LLM, policy, skill, tool, and turn observations. It records decision evidence such as goal candidates and confidence, selected skill and version, risk tier, policy result, model/provider and fallback status, tool outcome, latency, and OpenAI token usage when available. It does not record hidden model reasoning. Set `TRACE_CONSOLE_FORMAT=json` or pass `--trace-format json` when machine-readable JSON lines are needed; `--log-level DEBUG` also displays lower-level graph and state spans in pretty mode.
 
@@ -152,6 +152,7 @@ Common metadata fields are:
 | `fallback=no` | The configured provider succeeded. `fallback=yes` means the deterministic availability provider handled that operation. |
 | `in_tokens` / `out_tokens` | Tokens sent to and returned by the model for this call. |
 | `skill` | The catalog skill selected for policy or execution. |
+| `version` / `artifact` | The selected immutable semantic version and the first 12 characters of its content hash. Langfuse and JSON traces retain the full `skill_artifact_hash`. |
 | `risk_tier` | Governance category: `informational`, `navigation`, `read_only`, `consequential`, or `handoff`. It controls policy handling; it is not a model confidence score. |
 | `decision=policy_approved` | Deterministic policy allowed the skill to proceed. |
 | `confirmation` | Whether a consequential action is waiting for, has received, or does not require confirmation at this stage. |
@@ -259,15 +260,44 @@ member> resume
 member> checking
 ```
 
-`/add-online-id` atomically copies `skills/available/online_id.json` into `skills/catalog/`. The catalog notices it without restarting, and the already-compiled graph routes through its generic execution node. To return the checked-out demo to its initial four-skill state, remove that copied catalog file before the next run.
+`/add-online-id` compiles and publishes
+`skills/available/online_id/SKILL.md` as an immutable artifact, then atomically
+updates the active routing index. The catalog notices it without restarting,
+and the already-compiled graph routes through its generic execution node. New
+tasks use the newly active version; tasks already waiting for clarification,
+confirmation, or resume remain pinned to their original version and content
+hash.
 
 ## Add a skill
 
-Create one JSON file per skill. The catalog contract requires a name, version, generic execution type, description, owner, risk tier, supported goals and routing keywords, JSON input schema, allowed tools, response template, input-extraction metadata, and a declarative workflow. Give each goal a natural, member-facing `display_name`; the receptionist and goal-disambiguation copy derive their wording from it. Put approved candidate definitions in `skills/available/`, then copy or atomically publish one into `skills/catalog/`.
+Business authors create one `SKILL.md` with structured YAML frontmatter and a
+readable Markdown body. It declares ownership, semantic version, goals, inputs,
+behavior dimensions, governance, approved tools, response design, optional
+workflow, and acceptance scenarios. JSON under `_registry/artifacts` is a
+compiled runtime artifact and should not be hand-authored.
 
-Skill types describe reusable execution patterns, not business capabilities. For example, account balance is a `guided_resolution`; internal transfer is a `deterministic_workflow`. The workflow uses a validated operation set: `collect`, `call_tool`, `select`, `validate`, `validate_decimal`, `set`, `confirm`, and `respond`. Adding a new skill that composes these operations and existing tools requires only a new JSON file. If a required integration does not exist, add a tool adapter; the common LangGraph and workflow interpreter do not change. Invalid files are reported by `/skills` and never replace the last valid version.
+```bash
+member-assistant-skills validate skills/available/online_id/SKILL.md
+member-assistant-skills publish skills/available/online_id/SKILL.md
+member-assistant-skills active
+member-assistant-skills versions --name online_id_recovery
+```
 
-Consequential tool calls must be marked in the workflow and must immediately follow a `confirm` step. The catalog rejects definitions that violate this order or reference a tool outside the skill's `allowed_tools`.
+Built-in archetypes are authoring presets, not a closed list of business
+capabilities. A custom archetype works without new Python when it compiles to
+the allowlisted operations: `collect`, `call_tool`, `select`, `validate`,
+`validate_decimal`, `set`, `confirm`, and `respond`. Simple static-response and
+navigation skills receive an implicit workflow. If a referenced tool or action
+does not exist, publication fails; adding that tool adapter is the intended
+platform-code extension.
+
+Different content cannot overwrite an existing name/version. Increment the
+semantic version, publish it, and use `member-assistant-skills activate` to move
+the active pointer forward or back. Consequential calls must remain immediately
+after confirmation and still pass deterministic policy at execution time.
+
+The complete contract, call flow, behavior axes, and production control-plane
+roadmap are in [Nexus Skill v1 authoring and publication](docs/skill-authoring-and-publication.md).
 
 ## Tests
 
@@ -275,22 +305,24 @@ Consequential tool calls must be marked in the workflow and must immediately fol
 pytest
 ```
 
-The suite covers personalized greeting, no-goal escalation offers, goal disambiguation, natural slot fulfillment, grounded FAQ answers, balance clarification and restart durability, multi-goal ordering, transfer review/confirmation/execution, authentication policy, interruption with resume and discard, confirmed live-agent handoff, runtime skill discovery, a configuration-only new guided skill, stable graph identity, and invalid-catalog rollback.
+The suite covers personalized greeting, no-goal escalation offers, goal disambiguation, natural slot fulfillment, grounded FAQ answers, balance clarification and restart durability, multi-goal ordering, transfer review/confirmation/execution, authentication policy, interruption with resume and discard, confirmed live-agent handoff, runtime skill discovery, custom archetypes without Python, immutable publication and rollback, metadata-first loading, exact version pinning across restart, tool-dependency rejection, stable graph identity, and invalid-catalog rollback.
 
 ## Project map
 
 ```text
 src/member_assistant/
   runtime.py, models.py       stable graph and explicit conversation/task state
-  catalog.py                  discovery, validation, watcher, last-known-good cache
+  catalog.py                  metadata-first discovery, lazy artifacts, watcher
+  skill_authoring.py          SKILL.md compiler, acceptance gates, publisher
+  skill_cli.py                validate, publish, inspect, activate/rollback
   state_store.py, policy.py   SQLite durability/audit and deterministic controls
   observability.py            console/memory tracing and Langfuse OTLP exporter
   providers/                  provider-neutral contract, OpenAI, offline provider
   skills/                     one validated declarative workflow interpreter
   tools/                      typed mock adapters and generic tool registry
   cli.py                      local chat demo
-skills/catalog/               four startup definitions
-skills/available/             online-ID definition for hot installation
+skills/catalog/               startup definitions and generated version registry
+skills/available/             business-authored candidate SKILL.md files
 data/knowledge.json           approved mock FAQ content
 tests/                        automated acceptance scenarios
 observability/                local Langfuse v4 Docker Compose stack
@@ -300,7 +332,8 @@ observability/                local Langfuse v4 Docker Compose stack
 
 - Keyword routing and catalog-defined extraction rules are the deterministic fallback and test double; they are deliberately transparent rather than a production NLU system.
 - The declarative operation set is intentionally small. A novel integration requires a tool adapter; a novel reusable control may require a new platform operation, but never a capability-specific executor.
-- The file watcher is a local polling thread, not a governed publishing service.
+- The file publisher and polling watcher model a control plane locally; production needs authenticated approval, artifact signing/provenance, durable object storage, event-driven fleet rollout, compatibility gates, and retained versions for in-flight work.
+- Root-level JSON catalog files remain supported for the original POC examples while they are migrated; new business-authored capabilities should use `SKILL.md` and the versioned registry.
 - SQLite stores one local process's state; production would use encrypted shared storage, retention controls, and LangGraph-compatible distributed checkpoints.
 - Authentication and authorizations are synthetic session flags. URLs, balances, transfer receipts, and handoff cases are mock values only.
 - Policy/audit coverage demonstrates control boundaries but does not claim production compliance, fraud controls, or regulated-advice support.

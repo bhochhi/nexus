@@ -175,7 +175,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if message == "/skills":
                 print(
                     "assistant> Active skills: "
-                    + ", ".join(skill.name for skill in runtime.catalog.list())
+                    + ", ".join(skill.name for skill in runtime.catalog.routes())
                 )
                 if runtime.catalog.errors:
                     print("assistant> Catalog errors: " + json.dumps(runtime.catalog.errors))
@@ -187,8 +187,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 print(json.dumps(runtime.observability.describe(), indent=2, sort_keys=True))
                 continue
             if message == "/add-online-id":
-                source = settings.available_skills_path / "online_id.json"
-                target = runtime.catalog.install(source)
+                source = settings.available_skills_path / "online_id" / "SKILL.md"
+                target = runtime.catalog.install(source, runtime.tools.contracts())
                 print(
                     _color("assistant>", "1;32", color_enabled)
                     + " Installed {} at runtime; catalog revision is {}.".format(

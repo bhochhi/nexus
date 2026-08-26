@@ -12,6 +12,7 @@ class NavigationResult:
 
 class MockNavigationTool:
     name = "mock_approved_navigation"
+    actions = ("open_destination",)
 
     def open_destination(self, destination: str) -> NavigationResult:
         if destination != "online_id_recovery":

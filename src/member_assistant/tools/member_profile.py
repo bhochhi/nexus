@@ -5,6 +5,7 @@ from typing import Any, Dict
 
 class MockMemberProfileTool:
     name = "mock_member_profile"
+    actions = ("get",)
 
     def __init__(self) -> None:
         self._profiles = {
