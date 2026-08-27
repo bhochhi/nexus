@@ -29,6 +29,7 @@ def test_dotenv_is_loaded_and_process_environment_wins(tmp_path, monkeypatch):
         "MODEL_ID=file-model\n"
         "MODEL_REASONING_EFFORT=medium\n"
         "SESSION_TTL_SECONDS=900\n"
+        "HANDOFF_OFFER_TURN_THRESHOLD=6\n"
         "CATALOG_POLL_SECONDS=0.25\n",
         encoding="utf-8",
     )
@@ -42,6 +43,7 @@ def test_dotenv_is_loaded_and_process_environment_wins(tmp_path, monkeypatch):
     assert settings.model_id == "process-model"
     assert settings.model_reasoning_effort == "medium"
     assert settings.session_ttl_seconds == 900.0
+    assert settings.handoff_offer_turn_threshold == 6
     assert settings.catalog_poll_seconds == 0.25
 
 

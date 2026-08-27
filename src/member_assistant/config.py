@@ -43,6 +43,7 @@ class Settings:
     knowledge_path: Path = PROJECT_ROOT / "data" / "knowledge.json"
     state_db_path: Path = PROJECT_ROOT / "data" / "assistant_state.db"
     session_ttl_seconds: float = 600.0
+    handoff_offer_turn_threshold: int = 4
     catalog_poll_seconds: float = 0.5
     server_host: str = "127.0.0.1"
     server_port: int = 8000
@@ -167,6 +168,9 @@ class Settings:
             ),
             session_ttl_seconds=max(
                 0.0, float(configured("SESSION_TTL_SECONDS", "600") or "600")
+            ),
+            handoff_offer_turn_threshold=max(
+                1, int(configured("HANDOFF_OFFER_TURN_THRESHOLD", "4") or "4")
             ),
             catalog_poll_seconds=float(configured("CATALOG_POLL_SECONDS", "0.5") or "0.5"),
             server_host=(configured("SERVER_HOST", "127.0.0.1") or "127.0.0.1"),

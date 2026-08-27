@@ -55,7 +55,6 @@ implementation:
         outcome:
           status: no_approved_source
     response:
-      use_model: true
       values:
         answer: $vars.matches.0.answer
         source_title: $vars.matches.0.title

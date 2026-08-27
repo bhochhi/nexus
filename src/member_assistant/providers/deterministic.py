@@ -4,7 +4,7 @@ import re
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from member_assistant.catalog import SkillRoutingDefinition
-from .base import GoalMatch, ModelProvider, SlotUpdate, TurnAnalysis
+from .base import GoalMatch, ModelProvider, SkillGap, SlotUpdate, TurnAnalysis
 
 
 class DeterministicProvider(ModelProvider):
@@ -76,6 +76,7 @@ class DeterministicProvider(ModelProvider):
         catalog: Sequence[SkillRoutingDefinition],
         context: Optional[Mapping[str, Any]] = None,
     ) -> TurnAnalysis:
+        normalized = " ".join(message.lower().replace("’", "'").split())
         goals = self.identify_goals(message, catalog, context)
         active_name = str((context or {}).get("active_skill") or "")
         active = next((skill for skill in catalog if skill.name == active_name), None)
@@ -91,10 +92,41 @@ class DeterministicProvider(ModelProvider):
         )
         return TurnAnalysis(
             goals=goals,
+            skill_gap=self._detect_skill_gap(normalized, goals),
             slot_updates=slot_updates,
             conversation_act="provide_information" if slot_updates else "unknown",
             active_goal_relation="continue" if slot_updates else "none",
         )
+
+    @staticmethod
+    def _detect_skill_gap(
+        normalized_message: str, goals: Sequence[GoalMatch]
+    ) -> Optional[SkillGap]:
+        """Recognize a small set of unambiguous safety-critical capability gaps.
+
+        This gives the offline demo the same safe behavior as a semantic provider
+        for fraud reporting. It does not route or answer the request; the runtime
+        records the gap and offers the governed human-support capability.
+        """
+
+        if goals:
+            return None
+        fraud_phrases = (
+            "report fraud",
+            "report a fraud",
+            "report fraudulent",
+            "fraudulent charge",
+            "fraudulent transaction",
+            "someone used my card",
+            "card was used without",
+        )
+        if any(phrase in normalized_message for phrase in fraud_phrases):
+            return SkillGap(
+                objective="report suspected fraud",
+                category="fraud_reporting",
+                confidence=0.99,
+            )
+        return None
 
     def generate_response(self, instruction: str, facts: Dict[str, Any]) -> str:
         template = facts.get("template") or instruction

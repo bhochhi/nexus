@@ -39,7 +39,8 @@ def test_runtime_emits_platform_traces_for_a_catalog_skill(runtime_factory):
     assert "skill.approved_knowledge" in names
     assert "workflow.call_tool" in names
     assert "tool.local_knowledge.search" in names
-    assert "llm.grounded_response" in names
+    assert "response.grounded_template" in names
+    assert "llm.grounded_response" not in names
     assert "state.persist" in names
 
     goal = _event(sink, "llm.turn_understanding")
@@ -78,15 +79,15 @@ def test_trace_content_is_explicitly_opt_in(runtime_factory):
     assert turn["trace"]["session_id"] == "visible-session"
 
 
-def test_unmatched_turn_traces_reception_generation(runtime_factory):
+def test_unmatched_turn_traces_controlled_reception(runtime_factory):
     sink = MemoryTraceSink()
     observability = Observability([sink], include_content=False)
     runtime = runtime_factory(observability=observability)
 
     runtime.chat("reception-trace", "purple clouds")
 
-    reception = _event(sink, "llm.reception_response")
-    assert reception["metadata"]["provider"] == "deterministic"
+    reception = _event(sink, "response.controlled_reception")
+    assert reception["metadata"]["model_used"] is False
     assert reception["input"]["available_service_count"] == 3
     assert reception["input"]["content_redacted"] is True
 
@@ -105,7 +106,7 @@ def test_skill_gap_is_visible_as_a_structured_trace_event(runtime_factory):
     assert gap["metadata"]["objective"] == "recover your online ID"
     assert gap["metadata"]["confidence"] == 0.96
     assert "member_message" not in gap["metadata"]
-    assert "llm.reception_response" not in [event["name"] for event in sink.events]
+    assert "response.controlled_reception" not in [event["name"] for event in sink.events]
 
     rendered = _pretty_console_event(gap, color=False)
     assert "GAP" in rendered

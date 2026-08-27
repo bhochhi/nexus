@@ -1,14 +1,14 @@
 apiVersion: nexus.catalog/v1
-revision: 6
+revision: 16
 skills:
   approved_knowledge:
     version: 2.0.0
-    artifact_hash: 03a970d3ca5a632705d758ff961ebae2ef0a7451573804ae27dab2ca8b6edb17
+    artifact_hash: 1823e3e75fdaa4a9875fea18d8f179e0e6ae0267212ce8f3b9d85e034baa691f
     artifact: approved_knowledge/2.0.0/SKILL.md
     routing:
       name: approved_knowledge
       version: 2.0.0
-      artifact_hash: 03a970d3ca5a632705d758ff961ebae2ef0a7451573804ae27dab2ca8b6edb17
+      artifact_hash: 1823e3e75fdaa4a9875fea18d8f179e0e6ae0267212ce8f3b9d85e034baa691f
       archetype: knowledge
       description: Answers banking and insurance FAQs from approved local knowledge.
       owner: Member Knowledge Product

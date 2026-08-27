@@ -285,7 +285,22 @@ class DeclarativeSkillExecutor(SkillExecutor):
                     metadata=context.provider.observability_metadata(),
                 )
         else:
-            response = template.format(**values)
+            trace_name = (
+                "response.grounded_template"
+                if context.definition.archetype == "knowledge"
+                else "response.template"
+            )
+            with context.observability.observe(
+                trace_name,
+                "chain",
+                metadata={
+                    "skill": context.definition.name,
+                    "grounded": context.definition.archetype == "knowledge",
+                    "model_used": False,
+                },
+            ) as observation:
+                response = template.format(**values)
+                observation.update(output={"response_length": len(response)})
         self._complete_step(step, completed_steps)
         task["workflow_step"] += 1
         outcome = self._resolve(

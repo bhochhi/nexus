@@ -319,6 +319,22 @@ def test_clear_unsupported_objective_is_acknowledged_and_audited(runtime_factory
     assert "member_message" not in gap_events[0]["payload"]
 
 
+def test_fraud_reporting_gap_offers_handoff_immediately(runtime_factory):
+    runtime = runtime_factory()
+
+    reply = runtime.chat("fraud-gap", "I need to report fraud on my account")
+
+    assert "report suspected fraud" in reply.text
+    assert "Would you like me to connect" in reply.text
+    assert runtime.inspect_state("fraud-gap")["pending_handoff_offer"] is not None
+    gap_events = runtime.store.audit_events("fraud-gap")
+    assert any(
+        event["event_type"] == "skill_gap"
+        and event["payload"]["category"] == "fraud_reporting"
+        for event in gap_events
+    )
+
+
 def test_skill_gap_during_slot_collection_preserves_the_active_goal(runtime_factory):
     runtime = runtime_factory(provider=_GapAwareProvider())
     runtime.chat("gap-interruption", "check my balance")
@@ -410,9 +426,10 @@ def test_persisted_duplicate_goal_clarification_recovers_on_yes(runtime_factory)
 def test_repeated_no_goal_turns_offer_but_do_not_auto_start_handoff(runtime_factory):
     runtime = runtime_factory()
 
-    runtime.chat("no-goal", "purple clouds")
-    runtime.chat("no-goal", "still not that")
-    offer = runtime.chat("no-goal", "nothing matched")
+    for index in range(3):
+        reply = runtime.chat("no-goal", "unsupported topic {}".format(index))
+        assert "Would you like me to connect" not in reply.text
+    offer = runtime.chat("no-goal", "still unsupported")
 
     assert "Would you like me to connect" in offer.text
     state = runtime.inspect_state("no-goal")
@@ -422,6 +439,17 @@ def test_repeated_no_goal_turns_offer_but_do_not_auto_start_handoff(runtime_fact
     declined = runtime.chat("no-goal", "no")
     assert "won't connect" in declined.text
     assert runtime.inspect_state("no-goal")["pending_handoff_offer"] is None
+
+
+def test_unsupported_turn_counter_is_not_reset_by_a_greeting(runtime_factory):
+    runtime = runtime_factory()
+
+    for index in range(3):
+        runtime.chat("no-goal-greeting", "unsupported topic {}".format(index))
+    runtime.chat("no-goal-greeting", "hello")
+    offer = runtime.chat("no-goal-greeting", "one more unsupported topic")
+
+    assert "Would you like me to connect" in offer.text
 
 
 def test_ambiguous_goals_are_clarified_and_answer_is_durable(runtime_factory):

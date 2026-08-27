@@ -43,7 +43,7 @@ RISK_ORDER = {
 }
 GOAL_CONFIDENCE_THRESHOLD = 0.5
 GOAL_AMBIGUITY_MARGIN = 0.15
-HANDOFF_OFFER_TURN_THRESHOLD = 3
+IMMEDIATE_HANDOFF_SKILL_GAP_CATEGORIES = {"fraud_reporting"}
 SKILL_GAP_CONFIDENCE_THRESHOLD = 0.75
 SLOT_CONFIDENCE_THRESHOLD = 0.65
 
@@ -68,6 +68,7 @@ class AgentRuntime:
         authenticated: bool = True,
         authorizations: Optional[List[str]] = None,
         observability: Optional[Observability] = None,
+        handoff_offer_turn_threshold: int = 4,
     ):
         self.catalog = catalog
         self.store = store
@@ -76,6 +77,7 @@ class AgentRuntime:
         self.authenticated = authenticated
         self.authorizations = authorizations or ["balances:read", "transfers:internal"]
         self.observability = observability or Observability()
+        self.handoff_offer_turn_threshold = max(1, handoff_offer_turn_threshold)
         self.executors = SkillExecutorRegistry()
         self.policy = PolicyEngine()
         self.graph = self._build_graph()
@@ -94,7 +96,14 @@ class AgentRuntime:
         provider = build_provider(settings)
         tools = MockTools.create(settings.knowledge_path)
         observability = build_observability(settings)
-        return cls(catalog, store, provider, tools, observability=observability)
+        return cls(
+            catalog,
+            store,
+            provider,
+            tools,
+            observability=observability,
+            handoff_offer_turn_threshold=settings.handoff_offer_turn_threshold,
+        )
 
     def chat(
         self,
@@ -636,7 +645,7 @@ class AgentRuntime:
                 for match in goal_matches
                 if match.confidence >= GOAL_CONFIDENCE_THRESHOLD
             ]
-            skill_gap = provider_analysis.skill_gap
+            skill_gap = provider_analysis.skill_gap or deterministic_analysis.skill_gap
             accepted_skill_gap = (
                 skill_gap
                 if skill_gap
@@ -969,7 +978,6 @@ class AgentRuntime:
             return updates
 
         if self._is_greeting_or_capability_question(message):
-            conversation["no_goal_turn_count"] = 0
             updates.update(
                 next_action="finalize",
                 response_parts=[self._reception_response(conversation, catalog)],
@@ -992,7 +1000,7 @@ class AgentRuntime:
         conversation["no_goal_turn_count"] = int(
             conversation.get("no_goal_turn_count", 0)
         ) + 1
-        if conversation["no_goal_turn_count"] >= HANDOFF_OFFER_TURN_THRESHOLD:
+        if conversation["no_goal_turn_count"] >= self.handoff_offer_turn_threshold:
             return self._offer_handoff(
                 updates,
                 conversation,
@@ -1053,9 +1061,17 @@ class AgentRuntime:
         response_parts = [self._skill_gap_response(skill_gap)]
         if continuation:
             response_parts.append(continuation)
-        if conversation["no_goal_turn_count"] >= HANDOFF_OFFER_TURN_THRESHOLD:
+        if (
+            skill_gap.category in IMMEDIATE_HANDOFF_SKILL_GAP_CATEGORIES
+            or conversation["no_goal_turn_count"] >= self.handoff_offer_turn_threshold
+        ):
             offer = self._new_handoff_offer(
-                conversation, "repeated requests need an unavailable capability"
+                conversation,
+                (
+                    "member requested an unavailable fraud-reporting capability"
+                    if skill_gap.category in IMMEDIATE_HANDOFF_SKILL_GAP_CATEGORIES
+                    else "repeated requests need an unavailable capability"
+                ),
             )
             conversation["pending_handoff_offer"] = offer
             response_parts.append(offer["question"])
@@ -1507,7 +1523,7 @@ class AgentRuntime:
         if (
             result.status == "awaiting_input"
             and conversation.get("no_goal_turn_count", 0)
-            >= HANDOFF_OFFER_TURN_THRESHOLD
+            >= self.handoff_offer_turn_threshold
             and not conversation.get("pending_handoff_offer")
         ):
             offer = self._new_handoff_offer(
@@ -2055,42 +2071,21 @@ class AgentRuntime:
             "is_first_response": is_first_response,
             "template": fallback,
         }
-        instruction = (
-            "Act as a warm, respectful member-service receptionist. The goal router found no "
-            "currently supported goal for this message. If the request itself is clear, "
-            "briefly acknowledge the specific intent and explain that the service is not "
-            "currently available. If the request is genuinely unclear, ask one useful, "
-            "focused clarification question. Mention only services in available_services, "
-            "and only when helpful. Do not expose routing, internal skill names, or system "
-            "behavior. Do not offer a live agent on this turn. Do not invent account facts or "
-            "claim that an action was taken. If is_first_response is true, greet the member "
-            "by name once; otherwise do not repeat the member's name merely for style. Respond "
-            "in one to three concise sentences."
-        )
+        # This lane-setting response is deliberately rendered from controlled
+        # copy.  The model may understand a turn and select an approved skill,
+        # but it is never asked to answer an unsupported financial question from
+        # its training data.
         with self.observability.observe(
-            "llm.reception_response",
-            "generation",
-            input_value=self.observability.content(
-                {
-                    "message": message,
-                    "available_services": capabilities,
-                },
-                {
-                    "message_length": len(message),
-                    "available_service_count": len(capabilities),
-                    "content_redacted": True,
-                },
-            ),
-            metadata=self.provider.observability_metadata(),
-        ) as generation:
-            response = self.provider.generate_response(instruction, facts)
-            generation.update(
-                output=self.observability.content(
-                    {"response": response},
-                    {"response_length": len(response), "content_redacted": True},
-                ),
-                metadata=self.provider.observability_metadata(),
-            )
+            "response.controlled_reception",
+            "chain",
+            input_value={
+                "available_service_count": len(capabilities),
+                "content_redacted": True,
+            },
+            metadata={"model_used": False, "controlled_copy": True},
+        ) as observation:
+            response = fallback.format(**facts)
+            observation.update(output={"response_length": len(response)})
         if is_first_response:
             normalized = response.casefold().lstrip()
             if not normalized.startswith(

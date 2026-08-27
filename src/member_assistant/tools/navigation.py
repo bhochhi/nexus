@@ -19,7 +19,7 @@ class MockNavigationTool:
             raise ValueError("Destination is not approved")
         return NavigationResult(
             destination=destination,
-            url="https://example.test/member/online-id-recovery",
+            url="https://www.usaa.com/my/profile-recovery",
         )
 
     def invoke(self, action: str, arguments: Dict[str, Any]) -> Any:
