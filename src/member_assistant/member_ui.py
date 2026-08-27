@@ -7,6 +7,7 @@ from urllib.parse import quote
 import uuid
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from member_assistant.ui_client import RealtimeWebSocketClient
 
@@ -28,6 +29,7 @@ h1,h2,h3 { font-family:'Manrope',sans-serif; letter-spacing:-.04em; }
 .statusbar { display:flex; align-items:center; justify-content:space-between; padding:.72rem 1rem; background:rgba(255,255,255,.82); border:1px solid rgba(29,63,114,.09); border-radius:18px; backdrop-filter:blur(12px); margin:.7rem 0 1rem; }
 .statusdot { width:9px; height:9px; border-radius:50%; background:#35d2ba; box-shadow:0 0 0 5px rgba(53,210,186,.14); display:inline-block; margin-right:.55rem; }
 .soft { color:var(--muted); font-size:.86rem; }
+[data-testid="stVerticalBlock"][style*="height"] { height:min(480px, calc(100vh - 320px)) !important; }
 [data-testid="stChatMessage"] { border:1px solid rgba(26,54,92,.07); border-radius:20px; padding:.2rem .65rem; background:rgba(255,255,255,.78); box-shadow:0 8px 25px rgba(35,61,100,.055); }
 [data-testid="stChatMessage"] p, [data-testid="stChatMessage"] [data-testid="stCaptionContainer"] { color:#10213a !important; }
 [data-testid="stTextInput"] [data-baseweb="input"], [data-testid="stTextInput"] [data-baseweb="input"] > div, [data-testid="stChatInput"], [data-testid="stChatInput"] > div, [data-testid="stChatInput"] [data-baseweb="textarea"], [data-testid="stChatInput"] [data-baseweb="textarea"] > div { border-radius:20px; background-color:#fff !important; box-shadow:0 12px 30px rgba(35,61,100,.1); }
@@ -65,6 +67,7 @@ st.session_state.setdefault("case", None)
 st.session_state.setdefault("connection", "connecting")
 st.session_state.setdefault("notice", "")
 st.session_state.setdefault("member_ready", False)
+st.session_state.setdefault("last_scrolled_message_count", 0)
 
 st.markdown(
     """<div class="hero"><h1>Conversation-First Member Experience</h1>
@@ -233,11 +236,28 @@ def conversation() -> None:
             except ConnectionError as exc:
                 st.session_state.notice = str(exc)
 
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            if message.get("identity"):
-                st.caption(message["identity"])
-            st.markdown(message["content"])
+    with st.container(height=480, border=False):
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                if message.get("identity"):
+                    st.caption(message["identity"])
+                st.markdown(message["content"])
+
+    message_count = len(st.session_state.messages)
+    if message_count != st.session_state.last_scrolled_message_count:
+        components.html(
+            """
+            <script>
+            window.parent.requestAnimationFrame(() => {
+                const transcript = [...window.parent.document.querySelectorAll('[data-testid="stVerticalBlock"]')]
+                    .find(node => window.parent.getComputedStyle(node).overflowY === "auto");
+                if (transcript) transcript.scrollTo({ top: transcript.scrollHeight, behavior: "smooth" });
+            });
+            </script>
+            """,
+            height=0,
+        )
+        st.session_state.last_scrolled_message_count = message_count
 
     if st.session_state.notice and mode != "waiting":
         st.caption(st.session_state.notice)
