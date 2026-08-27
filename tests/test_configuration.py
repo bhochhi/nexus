@@ -150,6 +150,28 @@ def test_trace_configuration_is_loaded_from_secret_file(tmp_path, monkeypatch):
     assert settings.langfuse_base_url == "http://localhost:3333"
 
 
+def test_socket_configuration_is_loaded_from_environment_file(tmp_path, monkeypatch):
+    env_file = tmp_path / "socket.env"
+    env_file.write_text(
+        "SERVER_HOST=0.0.0.0\n"
+        "SERVER_PORT=8181\n"
+        "MEMBER_ASSISTANT_SERVER_URL=ws://localhost:8181/\n",
+        encoding="utf-8",
+    )
+    for name in (
+        "SERVER_HOST",
+        "SERVER_PORT",
+        "MEMBER_ASSISTANT_SERVER_URL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    settings = Settings.from_env(env_file, tmp_path / "missing-project.env")
+
+    assert settings.server_host == "0.0.0.0"
+    assert settings.server_port == 8181
+    assert settings.websocket_url == "ws://localhost:8181"
+
+
 def test_project_and_secret_env_files_are_merged_with_documented_precedence(
     tmp_path, monkeypatch
 ):

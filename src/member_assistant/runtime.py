@@ -4,7 +4,8 @@ from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 import re
-from typing import Any, Callable, Dict, List, Optional
+import threading
+from typing import Any, Callable, Dict, Iterator, List, Optional
 import uuid
 
 from langgraph.graph import END, START, StateGraph
@@ -15,6 +16,7 @@ from member_assistant.catalog import (
     SkillRoutingDefinition,
 )
 from member_assistant.config import Settings
+from member_assistant.events import AssistantEvent
 from member_assistant.models import ConversationState, TaskState, WorkflowState
 from member_assistant.observability import Observability, build_observability
 from member_assistant.policy import PolicyEngine
@@ -77,6 +79,8 @@ class AgentRuntime:
         self.executors = SkillExecutorRegistry()
         self.policy = PolicyEngine()
         self.graph = self._build_graph()
+        self._session_locks: Dict[str, threading.RLock] = {}
+        self._session_locks_guard = threading.Lock()
         self.catalog.start()
 
     @classmethod
@@ -92,98 +96,268 @@ class AgentRuntime:
         observability = build_observability(settings)
         return cls(catalog, store, provider, tools, observability=observability)
 
-    def chat(self, session_id: str, message: str) -> AssistantReply:
+    def chat(
+        self,
+        session_id: str,
+        message: str,
+        client_message_id: Optional[str] = None,
+    ) -> AssistantReply:
+        """Run one turn and aggregate its stream for synchronous callers."""
+
+        completed: Optional[AssistantEvent] = None
+        for event in self.stream_chat(
+            session_id, message, client_message_id=client_message_id
+        ):
+            if event.type == "turn.completed":
+                completed = event
+        if completed is None:
+            raise RuntimeError("turn did not produce a completion event")
+        return AssistantReply(
+            text=str(completed.metadata["reply"]),
+            outcome=deepcopy(completed.metadata.get("outcome")),
+            selected_skill=completed.metadata.get("selected_skill"),
+            catalog_revision=int(
+                completed.metadata.get("catalog_revision", self.catalog.revision)
+            ),
+        )
+
+    def stream_chat(
+        self,
+        session_id: str,
+        message: str,
+        *,
+        client_message_id: Optional[str] = None,
+    ) -> Iterator[AssistantEvent]:
+        """Process one turn and yield durable, provider-neutral events.
+
+        The graph still executes exactly once. ``stream_mode=values`` exposes
+        stable state boundaries so the runtime can publish member-facing response
+        parts without leaking LangGraph node names or provider-specific events.
+        """
+
         if not message or not message.strip():
             raise ValueError("message must not be empty")
+        if not session_id or not session_id.strip():
+            raise ValueError("session_id must not be empty")
         message = message.strip()
-        provider_metadata = self.provider.observability_metadata()
-        trace_input = self.observability.content(
-            {"message": message},
-            {"message_length": len(message), "content_redacted": True},
-        )
-        with self.observability.turn(
-            session_id,
-            input_value=trace_input,
-            metadata={
-                "catalog_revision": self.catalog.revision,
-                "provider": provider_metadata.get("provider"),
-                "model": provider_metadata.get("model"),
-            },
-        ) as turn_observation:
-            with self.observability.observe("state.load", "span") as state_observation:
-                conversation = deepcopy(self.store.load(session_id))
-                state_observation.update(
-                    output={
-                        "turn_count": conversation["turn_count"],
-                        "active_task": bool(conversation.get("active_task")),
-                        "paused_task_count": len(conversation.get("paused_tasks", [])),
-                    }
-                )
-            result = self.graph.invoke(
-                {
-                    "session_id": session_id,
-                    "conversation": conversation,
-                    "incoming_message": message,
-                    "goals": [],
-                    "response_parts": [],
-                    "audit_events": [],
-                    "catalog_revision": self.catalog.revision,
-                }
+        client_message_id = client_message_id or "msg_{}".format(uuid.uuid4().hex)
+        session_lock = self._session_lock(session_id)
+        with session_lock:
+            proposed_turn_id = "turn_{}".format(uuid.uuid4().hex)
+            claim = self.store.begin_turn(
+                session_id, client_message_id, proposed_turn_id, message
             )
-            final_conversation = result["conversation"]
-            with self.observability.observe(
-                "state.persist",
-                "span",
-                metadata={"audit_event_count": len(result.get("audit_events", [])) + 1},
-            ) as state_observation:
-                self.store.save(session_id, final_conversation)
-                for event in result.get("audit_events", []):
-                    self.store.append_audit(
-                        session_id, event["event_type"], event["payload"]
-                    )
-                self.store.append_audit(
+            turn_id = str(claim["turn_id"])
+            if not claim["created"]:
+                for event in self.store.stream_events(
+                    session_id, turn_id=turn_id
+                ):
+                    yield event
+                return
+
+            sequence = 0
+
+            def new_event(
+                event_type: str,
+                *,
+                content: Optional[str] = None,
+                final: bool = False,
+                metadata: Optional[Dict[str, Any]] = None,
+            ) -> AssistantEvent:
+                nonlocal sequence
+                sequence += 1
+                event = AssistantEvent.create(
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    sequence=sequence,
+                    event_type=event_type,
+                    content=content,
+                    final=final,
+                    metadata=metadata,
+                )
+                self.store.append_event(event)
+                return event
+
+            yield new_event(
+                "turn.accepted",
+                metadata={
+                    "client_message_id": client_message_id,
+                    "catalog_revision": self.catalog.revision,
+                },
+            )
+            try:
+                provider_metadata = self.provider.observability_metadata()
+                trace_input = self.observability.content(
+                    {"message": message},
+                    {"message_length": len(message), "content_redacted": True},
+                )
+                with self.observability.turn(
                     session_id,
-                    "turn_completed",
-                    {
-                        "turn": final_conversation["turn_count"],
-                        "selected_skill": final_conversation["selected_skill"],
-                        "confirmation_status": final_conversation["confirmation_status"],
-                        "outcome_status": (final_conversation.get("outcome") or {}).get(
-                            "status"
-                        ),
-                        "goal_clarification_pending": bool(
-                            final_conversation.get("pending_goal_clarification")
-                        ),
-                        "handoff_offer_pending": bool(
-                            final_conversation.get("pending_handoff_offer")
-                        ),
-                        "task_transition_pending": bool(
-                            final_conversation.get("pending_task_transition")
-                        ),
-                        "no_goal_turn_count": final_conversation.get(
-                            "no_goal_turn_count", 0
-                        ),
+                    input_value=trace_input,
+                    metadata={
+                        "turn_id": turn_id,
+                        "client_message_id": client_message_id,
+                        "catalog_revision": self.catalog.revision,
+                        "provider": provider_metadata.get("provider"),
+                        "model": provider_metadata.get("model"),
+                    },
+                ) as turn_observation:
+                    with self.observability.observe(
+                        "state.load", "span"
+                    ) as state_observation:
+                        conversation = deepcopy(self.store.load(session_id))
+                        state_observation.update(
+                            output={
+                                "turn_count": conversation["turn_count"],
+                                "active_task": bool(conversation.get("active_task")),
+                                "paused_task_count": len(
+                                    conversation.get("paused_tasks", [])
+                                ),
+                            }
+                        )
+                    initial_state = {
+                        "session_id": session_id,
+                        "conversation": conversation,
+                        "incoming_message": message,
+                        "goals": [],
+                        "response_parts": [],
+                        "audit_events": [],
+                        "catalog_revision": self.catalog.revision,
+                    }
+                    result: Optional[WorkflowState] = None
+                    emitted_part_count = 0
+                    for snapshot in self.graph.stream(
+                        initial_state, stream_mode="values"
+                    ):
+                        result = snapshot
+                        response_parts = snapshot.get("response_parts", [])
+                        while emitted_part_count < len(response_parts):
+                            part_index = emitted_part_count
+                            part = str(response_parts[part_index]).strip()
+                            emitted_part_count += 1
+                            if not part:
+                                continue
+                            event_type, message_kind = self._stream_message_type(
+                                snapshot["conversation"],
+                                is_latest=part_index == len(response_parts) - 1,
+                            )
+                            content = self._stream_message_content(
+                                part,
+                                snapshot["conversation"],
+                                is_first=part_index == 0,
+                            )
+                            active_task = snapshot["conversation"].get("active_task")
+                            yield new_event(
+                                event_type,
+                                content=content,
+                                metadata={
+                                    "message_kind": message_kind,
+                                    "selected_skill": snapshot["conversation"].get(
+                                        "selected_skill"
+                                    ),
+                                    "task_id": active_task.get("id")
+                                    if active_task
+                                    else None,
+                                },
+                            )
+                    if result is None or "reply" not in result:
+                        raise RuntimeError("graph did not produce a final state")
+                    final_conversation = result["conversation"]
+                    self._persist_turn(session_id, result)
+                    final_metadata = {
+                        "client_message_id": client_message_id,
+                        "reply": result["reply"],
+                        "selected_skill": final_conversation.get("selected_skill"),
+                        "outcome": deepcopy(final_conversation.get("outcome")),
+                        "outcome_status": (
+                            final_conversation.get("outcome") or {}
+                        ).get("status"),
+                        "confirmation_status": final_conversation[
+                            "confirmation_status"
+                        ],
                         "catalog_revision": result.get(
                             "catalog_revision", self.catalog.revision
                         ),
+                        "turn": final_conversation["turn_count"],
+                        **self.provider.observability_metadata(),
+                    }
+                    completed_event = new_event(
+                        "turn.completed", final=True, metadata=final_metadata
+                    )
+                    self.store.complete_turn(turn_id, "completed")
+                    turn_observation.update(
+                        output=self.observability.content(
+                            {"reply": result["reply"]},
+                            {
+                                "reply_length": len(result["reply"]),
+                                "content_redacted": True,
+                            },
+                        ),
+                        metadata={
+                            "turn_id": turn_id,
+                            "selected_skill": final_conversation.get(
+                                "selected_skill"
+                            ),
+                            "outcome_status": final_metadata["outcome_status"],
+                            "confirmation_status": final_metadata[
+                                "confirmation_status"
+                            ],
+                            "goal_clarification_pending": bool(
+                                final_conversation.get("pending_goal_clarification")
+                            ),
+                            "handoff_offer_pending": bool(
+                                final_conversation.get("pending_handoff_offer")
+                            ),
+                            "task_transition_pending": bool(
+                                final_conversation.get("pending_task_transition")
+                            ),
+                            "no_goal_turn_count": final_conversation.get(
+                                "no_goal_turn_count", 0
+                            ),
+                            "turn": final_conversation["turn_count"],
+                        },
+                    )
+                    yield completed_event
+            except Exception as exc:
+                failed_event = new_event(
+                    "turn.failed",
+                    content="I couldn't complete that request safely. Please try again.",
+                    final=True,
+                    metadata={
+                        "client_message_id": client_message_id,
+                        "error_type": type(exc).__name__,
                     },
                 )
-                state_observation.update(output={"status": "saved"})
-            reply = AssistantReply(
-                text=result["reply"],
-                outcome=deepcopy(final_conversation.get("outcome")),
-                selected_skill=final_conversation.get("selected_skill"),
-                catalog_revision=result.get("catalog_revision", self.catalog.revision),
-            )
-            turn_observation.update(
-                output=self.observability.content(
-                    {"reply": reply.text},
-                    {"reply_length": len(reply.text), "content_redacted": True},
-                ),
-                metadata={
-                    "selected_skill": reply.selected_skill,
-                    "outcome_status": (reply.outcome or {}).get("status"),
+                self.store.complete_turn(turn_id, "failed")
+                yield failed_event
+                raise
+
+    def _session_lock(self, session_id: str) -> threading.RLock:
+        with self._session_locks_guard:
+            return self._session_locks.setdefault(session_id, threading.RLock())
+
+    def _persist_turn(self, session_id: str, result: WorkflowState) -> None:
+        final_conversation = result["conversation"]
+        with self.observability.observe(
+            "state.persist",
+            "span",
+            metadata={"audit_event_count": len(result.get("audit_events", [])) + 1},
+        ) as state_observation:
+            self.store.save(session_id, final_conversation)
+            for event in result.get("audit_events", []):
+                self.store.append_audit(
+                    session_id, event["event_type"], event["payload"]
+                )
+            self.store.append_audit(
+                session_id,
+                "turn_completed",
+                {
+                    "turn": final_conversation["turn_count"],
+                    "selected_skill": final_conversation["selected_skill"],
                     "confirmation_status": final_conversation["confirmation_status"],
+                    "outcome_status": (final_conversation.get("outcome") or {}).get(
+                        "status"
+                    ),
                     "goal_clarification_pending": bool(
                         final_conversation.get("pending_goal_clarification")
                     ),
@@ -196,10 +370,46 @@ class AgentRuntime:
                     "no_goal_turn_count": final_conversation.get(
                         "no_goal_turn_count", 0
                     ),
-                    "turn": final_conversation["turn_count"],
+                    "catalog_revision": result.get(
+                        "catalog_revision", self.catalog.revision
+                    ),
                 },
             )
-            return reply
+            state_observation.update(output={"status": "saved"})
+
+    @staticmethod
+    def _stream_message_content(
+        content: str, conversation: ConversationState, *, is_first: bool
+    ) -> str:
+        if is_first and not conversation.get("greeted"):
+            preferred_name = conversation.get("member_profile", {}).get(
+                "preferred_name", "Member"
+            )
+            greeting = "Hi {}.".format(preferred_name)
+            if not content.casefold().startswith(greeting.casefold()):
+                return "{} {}".format(greeting, content)
+        return content
+
+    @staticmethod
+    def _stream_message_type(
+        conversation: ConversationState, *, is_latest: bool
+    ) -> tuple:
+        if not is_latest:
+            return "assistant.message", "informational"
+        active_task = conversation.get("active_task")
+        if conversation.get("pending_handoff_offer"):
+            return "handoff.offered", "handoff_offer"
+        if conversation.get("pending_task_transition") or (
+            active_task and active_task.get("status") == "awaiting_confirmation"
+        ):
+            return "assistant.request_confirmation", "confirmation"
+        if (
+            conversation.get("pending_goal_clarification")
+            or conversation.get("pending_clarification")
+            or (active_task and active_task.get("status") == "awaiting_input")
+        ):
+            return "assistant.request_input", "elicitation"
+        return "assistant.message", "informational"
 
     def inspect_state(self, session_id: str) -> ConversationState:
         return self.store.inspect(session_id)

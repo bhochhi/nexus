@@ -10,6 +10,9 @@ A small, runnable financial-services member-assistance proof of concept built wi
 - One portable, business-facing `SKILL.md` artifact format plus a safe declarative workflow interpreter shared by built-in and custom authoring archetypes. There is no parallel JSON skill representation.
 - Approved-knowledge, guided-balance, deterministic internal-transfer, and live-agent skills active at startup. Online-ID recovery is packaged separately for live installation.
 - SQLite conversation snapshots and privacy-safe audit events.
+- A provider-neutral durable event stream, FastAPI WebSocket/REST service,
+  replay cursors, and idempotent member-message IDs. The terminal member client
+  uses the same WebSocket contract intended for a future browser chat UI.
 - Provider-neutral structured tracing with console, in-memory test, and local Langfuse/OpenTelemetry sinks. Content is redacted and session identifiers are hashed by default.
 - Typed mock adapters for member profile, knowledge, accounts, transfers, navigation, and live support.
 
@@ -37,16 +40,29 @@ mkdir -p ~/.secrets
 cp .env.example ~/.secrets/dev.env
 ```
 
-Run completely offline:
+Run the socket service completely offline in one terminal:
 
 ```bash
-MODEL_PROVIDER=mock member-assistant --db data/demo.db
+MODEL_PROVIDER=mock member-assistant-server --db data/demo.db
 ```
 
-Run with the configurable default OpenAI adapter:
+Then run the member-only WebSocket client in another terminal:
 
 ```bash
-member-assistant --db data/demo.db
+member-assistant
+```
+
+The member client contains no catalog, state, or tracing commands. Press
+Ctrl-D or Ctrl-C to leave it. System operations use `member-assistant-admin`,
+skill lifecycle operations use `member-assistant-skills`, and local Langfuse
+operations use `member-assistant-observability`.
+
+Run the server with the configurable default OpenAI adapter by omitting the
+`MODEL_PROVIDER=mock` prefix. Provider, model, database, catalog, trace, and
+retention overrides belong to `member-assistant-server`, not the member client:
+
+```bash
+member-assistant-server --provider openai --db data/demo.db --trace both
 ```
 
 Use a distinct session name for each clean demo. Reusing the same database and
@@ -54,7 +70,7 @@ session deliberately restores unfinished tasks and prior clarification state,
 provided that the session has not been inactive for 10 minutes:
 
 ```bash
-member-assistant --db data/demo.db --session transfer-demo-01
+member-assistant --session transfer-demo-01
 ```
 
 Conversation snapshots expire after 10 minutes of inactivity by default. The
@@ -65,7 +81,7 @@ override for a particular run, or set either value to zero to disable expiry:
 
 ```bash
 SESSION_TTL_SECONDS=600
-member-assistant --db data/demo.db --session-ttl-minutes 10
+member-assistant-server --db data/demo.db --session-ttl-minutes 10
 ```
 
 The default `MODEL_PROVIDER` is `openai`, and the default direct OpenAI model is
@@ -92,7 +108,7 @@ access or secret keys in the project `.env`; use an AWS profile for local work
 or a workload/IAM role in a deployed service. The calling identity needs model
 inference access, including `bedrock:InvokeModel`, and the selected model must be
 available in the configured Region. You can also test a one-off combination
-with `member-assistant --provider bedrock --model <model-id>`.
+with `member-assistant-server --provider bedrock --model <model-id>`.
 `MODEL_REASONING_EFFORT` currently applies only to the direct OpenAI adapter;
 Bedrock Converse uses each selected model's default reasoning behavior so the
 shared adapter does not send a model-specific option that Nova or Terra might
@@ -116,15 +132,73 @@ logged even when AWS guardrail tracing is enabled.
 If no OpenAI key is present—or an ordinary configured-provider call fails—and
 `ALLOW_PROVIDER_FALLBACK=true` (the template default), the runtime safely uses
 deterministic catalog routing. Set `ALLOW_PROVIDER_FALLBACK=false` to require the
-configured provider and expose API failures directly in the CLI. To use a
+configured provider and expose API failures as safe streamed turn failures. To use a
 different user-secret file, export
 `MEMBER_ASSISTANT_ENV_FILE=/path/to/file`; the project `.env` remains the
 lower-priority local configuration source. The repository's `.env.example`
 contains no secret and is never read at runtime.
 
 
-Useful CLI commands are `/skills`, `/state`, `/trace`, `/add-online-id`,
-`/remove-online-id`, and `/quit`.
+Useful system commands are `member-assistant-admin skills`,
+`member-assistant-admin state`, `member-assistant-admin trace`,
+`member-assistant-admin add-online-id`, and
+`member-assistant-admin remove-online-id`.
+
+## Socket and streaming architecture
+
+The process owns one `AgentRuntime` and one compiled LangGraph. Every member
+turn passes through that graph; hot-reloaded `SKILL.md` artifacts change the
+available goals and declarative execution plan without creating another graph,
+restarting the server, or changing the WebSocket protocol.
+
+The WebSocket endpoint is:
+
+```text
+/v1/sessions/{session_id}/stream
+```
+
+The member sends an idempotent message:
+
+```json
+{
+  "type": "member.message",
+  "message_id": "msg_client_generated_unique_id",
+  "content": "Tell me my balance and then help me transfer money"
+}
+```
+
+The server responds with ordered durable events such as:
+
+```text
+turn.accepted
+assistant.message
+assistant.request_input
+assistant.request_confirmation
+handoff.offered
+turn.completed
+```
+
+Each durable event contains `event_id`, `session_id`, `turn_id`, per-turn
+`sequence`, `type`, `created_at`, `final`, optional `content`, and safe
+`metadata`. Reusing the same `message_id` with the same content replays its
+original turn instead of running tools or a consequential action twice. Reusing
+it with different content is rejected.
+
+Reconnect with `?after_event_id=<event-id>` to replay only later committed
+events. `GET /v1/sessions/{session_id}/events` exposes the same replay log, and
+`GET /v1/sessions/{session_id}` returns the durable state plus events for local
+inspection. Conversation snapshots, replay events, and idempotency receipts use
+the configured session TTL; privacy-safe audit history is retained separately.
+Every socket connected to the same session receives the live event stream. Turn
+execution runs independently of any one connection, so disconnecting a browser
+does not cancel or duplicate the durable graph turn.
+
+This first version streams meaningful conversation events, not hidden model
+reasoning and not raw token deltas. Goal detection remains a structured provider
+call. Longer grounded responses can later add provider token-delta events behind
+the same runtime contract. The socket transport is also the foundation for a
+future live-agent participant and ownership-routing service; this POC still uses
+the existing mock handoff tool and does not yet connect a human agent.
 
 ## Conversation behavior
 
@@ -193,12 +267,14 @@ The runtime emits one trace for each member turn, with nested observations for s
 
 Console tracing is enabled by default. Interactive runs use compact, color-coded output for the important LLM, policy, skill, tool, and turn observations. It records decision evidence such as goal candidates and confidence, selected skill and version, risk tier, policy result, model/provider and fallback status, tool outcome, latency, and provider token usage when available. It does not record hidden model reasoning. Set `TRACE_CONSOLE_FORMAT=json` or pass `--trace-format json` when machine-readable JSON lines are needed; `--log-level DEBUG` also displays lower-level graph and state spans in pretty mode.
 
-### How to read the CLI trace
+### How to read server traces and member events
 
-Read the compact output from top to bottom as the path taken for one member
+The server terminal owns model, policy, skill, tool, and Langfuse traces. Read
+its compact output from top to bottom as the path taken for one member
 utterance. A green check means that stage completed; a red `x` means that stage
-raised an error. The time at the right is that stage's elapsed time in
-milliseconds.
+raised an error. The member-client terminal receives only the safe conversation
+event stream. The time at the right of a server trace is that stage's elapsed
+time in milliseconds.
 
 | Output | Meaning |
 | --- | --- |
@@ -208,8 +284,9 @@ milliseconds.
 | `TOOL tool.<name>` | A typed integration was called. Every integration in this POC is mock/local even when its name describes accounts, transfers, or a live agent. |
 | `SKILL skill.<name>` | The declarative skill workflow completed its current pass. It may have asked for missing input, paused for confirmation, or produced an outcome. |
 | `TURN member-assistant.turn` | The root observation summarizing the complete member turn, including model, policy, tools, skill execution, state persistence, and reply. |
-| `assistant>` | The member-facing reply. |
-| `model(last call)>` | A concise verification of which configured provider/model actually handled the most recent model operation. |
+| `assistant>` | A member-facing WebSocket message rendered by the member client. |
+| `assistant is working…` | The durable `turn.accepted` event arrived and server processing has begun. |
+| `model(last call)>` | Completion-event metadata showing which provider/model handled the most recent model operation. |
 
 Common metadata fields are:
 
@@ -247,26 +324,28 @@ tool created a synthetic case, the skill reported `queued`, and the complete tur
 took about 1.16 seconds. `handoff_offer=no` means this was not a pending proactive
 offer—it was already processed as a direct request.
 
-Use CLI overrides when testing:
+Use server overrides when testing:
 
 ```bash
 # No traces
-member-assistant --provider mock --trace off
+member-assistant-server --provider mock --trace off
 
-# Human-readable chat on stdout and structured trace JSON on stderr
-member-assistant --provider mock --trace console --log-level DEBUG
+# Human-readable server traces
+member-assistant-server --provider mock --trace console --log-level DEBUG
 
 # Preserve the original machine-readable JSON lines
-member-assistant --provider mock --trace console --trace-format json
+member-assistant-server --provider mock --trace console --trace-format json
 
 # Export only to local Langfuse
-member-assistant --provider mock --trace langfuse
+member-assistant-server --provider mock --trace langfuse
 
 # Console and Langfuse together
-member-assistant --provider mock --trace both
+member-assistant-server --provider mock --trace both
 ```
 
-`/trace` prints the active tracing configuration. Environment equivalents are documented in `.env.example`; put their values in `~/.secrets/dev.env` or the project `.env`.
+`member-assistant-admin trace` prints the effective tracing configuration.
+Environment equivalents are documented in `.env.example`; put their values in
+`~/.secrets/dev.env` or the project `.env`.
 
 ### Local Langfuse
 
@@ -286,15 +365,19 @@ demo@member-assistant.local
 local-observability-demo
 ```
 
-Generate a trace and then open the `Agentic Member Assistant POC` project:
+Start a traced server, use the member client, and then open the
+`Agentic Member Assistant POC` project:
 
 ```bash
-member-assistant --provider mock --trace both --session tracing-demo
+member-assistant-server --provider mock --trace both
+# In another terminal:
+member-assistant --session tracing-demo
 ```
 
 For normal OpenAI testing, either set `TRACE_BACKENDS=console,langfuse` or pass
-`--trace both`. Restart the CLI after changing an environment file, then enter
-`/trace`; its `backends` list must contain both `console` and `langfuse`. Exports
+`--trace both` to the server. Restart the server after changing an environment
+file, then run `member-assistant-admin trace`; its `backends` list must contain
+both `console` and `langfuse`. Exports
 are batched and normally appear shortly after a turn. With
 `TRACE_HASH_SESSION_ID=true`, Langfuse displays a value such as
 `sha256:3806594b03a90823` rather than the raw CLI `--session` value.
@@ -304,9 +387,8 @@ If traces are absent, verify both the server and the configured exporter:
 ```bash
 member-assistant-observability status
 member-assistant-observability doctor
-member-assistant --trace both --session tracing-check
-# In the CLI:
-/trace
+member-assistant-admin trace
+member-assistant --session tracing-check
 ```
 
 `doctor` verifies server health, project-key authentication, and the latest
@@ -327,21 +409,33 @@ The application sends standard OTLP/HTTP observations to Langfuse. Langfuse is a
 
 ## Hot-reload demonstration
 
-Start the CLI and verify that four skills are active:
+Keep the server and member CLI running. In a third terminal, verify the active
+catalog and publish the demo skill:
+
+```bash
+member-assistant-admin skills
+member-assistant-admin add-online-id
+```
+
+The open member client can use the capability as soon as the catalog poller
+observes the new revision:
 
 ```text
-member> /skills
 member> What is my balance?
 assistant> Which account would you like ...?
-member> /add-online-id
 member> I forgot my online ID
 assistant> Use the approved online-ID recovery page ... Would you like to resume ...?
 member> resume
 member> checking
-member> /remove-online-id
 ```
 
-`/add-online-id` compiles and publishes
+Then deactivate it for new requests without stopping the server:
+
+```bash
+member-assistant-admin remove-online-id
+```
+
+`add-online-id` compiles and publishes
 `skills/available/online_id_recovery/SKILL.md` as an immutable artifact, then atomically
 updates the active routing index. The catalog notices it without restarting,
 and the already-compiled graph routes through its generic execution node. New
@@ -349,7 +443,7 @@ tasks use the newly active version; tasks already waiting for clarification,
 confirmation, or resume remain pinned to their original version and content
 hash.
 
-`/remove-online-id` deactivates it for new goals without deleting the immutable
+`remove-online-id` deactivates it for new goals without deleting the immutable
 artifact. A paused task that already references that version can still resume.
 Every publish, activate, rollback, and deactivate operation appends an actor,
 timestamp, version, hash, and catalog revision to the local
@@ -396,13 +490,26 @@ roadmap are in [Nexus Skill v1 authoring and publication](docs/skill-authoring-a
 pytest
 ```
 
-The suite covers personalized greeting, no-goal escalation offers, goal disambiguation, natural slot fulfillment, grounded FAQ answers, balance clarification and restart durability, multi-goal ordering, transfer review/confirmation/execution, authentication policy, interruption with resume and discard, confirmed live-agent handoff, runtime skill discovery, custom archetypes without Python, immutable publication and rollback, metadata-first loading, exact version pinning across restart, tool-dependency rejection, stable graph identity, invalid-catalog rollback, direct OpenAI requests, Bedrock Converse compatibility for Nova/Terra, and non-bypassable Guardrail interventions.
+The suite covers personalized greeting, no-goal escalation offers, goal
+disambiguation, natural slot fulfillment, grounded FAQ answers, balance
+clarification and restart durability, multi-goal ordering, transfer
+review/confirmation/execution, authentication policy, interruption with resume
+and discard, confirmed live-agent handoff, runtime skill discovery, custom
+archetypes without Python, immutable publication and rollback, metadata-first
+loading, exact version pinning across restart, tool-dependency rejection, stable
+graph identity, invalid-catalog rollback, direct OpenAI requests, Bedrock
+Converse compatibility for Nova/Terra, non-bypassable Guardrail interventions,
+semantic event ordering, WebSocket delivery, reconnect replay, TTL cleanup, and
+message idempotency.
 
 ## Project map
 
 ```text
 src/member_assistant/
-  runtime.py, models.py       stable graph and explicit conversation/task state
+  runtime.py, models.py       one stable graph and explicit conversation/task state
+  events.py                   provider/transport-neutral durable event contract
+  server.py, server_cli.py    FastAPI REST/WebSocket transport and service entrypoint
+  cli.py, admin_cli.py        member socket client and separate system controls
   catalog.py                  metadata-first discovery, lazy artifacts, watcher
   skill_authoring.py          SKILL.md compiler, acceptance gates, publisher
   skill_cli.py                validate, publish, inspect, activate/deactivate
@@ -411,7 +518,6 @@ src/member_assistant/
   providers/                  shared turn contract, OpenAI, Bedrock, offline adapters
   skills/                     one validated declarative workflow interpreter
   tools/                      typed mock adapters and generic tool registry
-  cli.py                      local chat demo
 skills/catalog/               active.yaml plus immutable versioned SKILL.md artifacts
 skills/available/             business-authored candidate SKILL.md files
 data/knowledge.json           approved mock FAQ content
@@ -426,5 +532,8 @@ observability/                local Langfuse v4 Docker Compose stack
 - The file publisher and polling watcher model a control plane locally; production needs authenticated approval, artifact signing/provenance, durable object storage, event-driven fleet rollout, compatibility gates, and retained versions for in-flight work.
 - Every capability uses the same `SKILL.md` contract. The catalog has no legacy JSON loader or capability-specific Python executor.
 - SQLite stores one local process's state; production would use encrypted shared storage, retention controls, and LangGraph-compatible distributed checkpoints.
+- The socket POC supports durable member event streaming and replay but not yet
+  authenticated multi-participant rooms, distributed fan-out, or a real live-agent
+  work queue. The live-agent skill still invokes a mock tool.
 - Authentication and authorizations are synthetic session flags. URLs, balances, transfer receipts, and handoff cases are mock values only.
 - Policy/audit coverage demonstrates control boundaries but does not claim production compliance, fraud controls, or regulated-advice support.

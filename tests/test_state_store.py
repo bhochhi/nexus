@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from member_assistant.models import new_conversation_state
+from member_assistant.events import AssistantEvent
 from member_assistant.state_store import SQLiteConversationStore
 
 
@@ -68,3 +69,31 @@ def test_expired_sessions_are_cleaned_when_store_restarts(tmp_path):
         assert second.load("old-session")["turn_count"] == 0
     finally:
         second.close()
+
+
+def test_expiration_removes_replay_events_but_retains_audit_history(tmp_path):
+    clock = _Clock()
+    store = SQLiteConversationStore(
+        tmp_path / "event-ttl.db", session_ttl_seconds=600, clock=clock
+    )
+    try:
+        state = new_conversation_state()
+        store.save("event-session", state)
+        store.begin_turn("event-session", "message-1", "turn-1", "hello")
+        store.append_event(
+            AssistantEvent.create(
+                session_id="event-session",
+                turn_id="turn-1",
+                sequence=1,
+                event_type="turn.accepted",
+            )
+        )
+        store.append_audit("event-session", "turn_started", {"turn": 1})
+
+        clock.advance(601)
+        assert store.cleanup_expired() == 1
+
+        assert store.stream_events("event-session") == []
+        assert store.audit_events("event-session")[0]["event_type"] == "turn_started"
+    finally:
+        store.close()

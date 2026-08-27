@@ -44,6 +44,9 @@ class Settings:
     state_db_path: Path = PROJECT_ROOT / "data" / "assistant_state.db"
     session_ttl_seconds: float = 600.0
     catalog_poll_seconds: float = 0.5
+    server_host: str = "127.0.0.1"
+    server_port: int = 8000
+    websocket_url: str = "ws://127.0.0.1:8000"
     trace_backends: Tuple[str, ...] = ("console",)
     trace_console_format: str = "pretty"
     trace_include_content: bool = False
@@ -166,6 +169,12 @@ class Settings:
                 0.0, float(configured("SESSION_TTL_SECONDS", "600") or "600")
             ),
             catalog_poll_seconds=float(configured("CATALOG_POLL_SECONDS", "0.5") or "0.5"),
+            server_host=(configured("SERVER_HOST", "127.0.0.1") or "127.0.0.1"),
+            server_port=int(configured("SERVER_PORT", "8000") or "8000"),
+            websocket_url=(
+                configured("MEMBER_ASSISTANT_SERVER_URL", "ws://127.0.0.1:8000")
+                or "ws://127.0.0.1:8000"
+            ).rstrip("/"),
             trace_backends=_as_csv(configured("TRACE_BACKENDS", "console") or "console"),
             trace_console_format=(
                 configured("TRACE_CONSOLE_FORMAT", "pretty") or "pretty"

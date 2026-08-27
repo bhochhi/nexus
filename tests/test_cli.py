@@ -1,129 +1,107 @@
 import json
-from types import SimpleNamespace
+from pathlib import Path
 
-from member_assistant.cli import main
-from member_assistant.cli import _provider_line
-from member_assistant.config import PROJECT_ROOT, Settings
-from member_assistant.providers import DeterministicProvider
+from member_assistant.admin_cli import main as admin_main
+from member_assistant.cli import _model_line, main
+from member_assistant.config import PROJECT_ROOT
 from member_assistant.skill_cli import main as skill_main
 
 
-def test_mock_provider_is_not_reported_as_a_fallback():
-    runtime = SimpleNamespace(provider=DeterministicProvider())
-    line = _provider_line(Settings(provider_name="mock"), runtime)
+class _FakeSocket:
+    def __init__(self, incoming):
+        self.incoming = iter(incoming)
+        self.sent = []
 
-    assert "requested=mock" in line
-    assert "active=deterministic" in line
-    assert "fallback=not used" in line
-    assert "fallback_policy=not applicable" in line
+    def __enter__(self):
+        return self
 
+    def __exit__(self, *_):
+        return False
 
-def test_missing_openai_key_is_reported_as_an_active_fallback():
-    runtime = SimpleNamespace(
-        provider=DeterministicProvider(
-            fallback_from="openai", fallback_reason="missing_api_key"
-        )
-    )
-    line = _provider_line(Settings(provider_name="openai"), runtime)
+    def recv(self):
+        return json.dumps(next(self.incoming))
 
-    assert "requested=openai" in line
-    assert "active=deterministic" in line
-    assert "fallback=USED" in line
-    assert "reason=missing_api_key" in line
+    def send(self, payload):
+        self.sent.append(json.loads(payload))
 
 
-def test_openai_responses_endpoint_and_reasoning_are_visible():
-    provider = SimpleNamespace(
-        name="openai",
-        model_id="gpt-5.6-luna",
-        observability_metadata=lambda: {
-            "provider": "openai",
-            "model": "gpt-5.6-luna",
-            "api_endpoint": "responses",
-            "reasoning_effort": "low",
-            "fallback_used": False,
-        },
-    )
-    runtime = SimpleNamespace(provider=provider)
-
-    line = _provider_line(Settings(), runtime)
-
-    assert "model=gpt-5.6-luna" in line
-    assert "endpoint=responses" in line
-    assert "reasoning=low" in line
-
-
-def test_bedrock_converse_region_and_guardrail_are_visible():
-    provider = SimpleNamespace(
-        name="bedrock",
-        model_id="us.openai.gpt-5.6-terra",
-        observability_metadata=lambda: {
+def test_model_metadata_is_rendered_from_completion_event():
+    line = _model_line(
+        {
             "provider": "bedrock",
-            "model": "us.openai.gpt-5.6-terra",
+            "model": "us.amazon.nova-2-lite-v1:0",
             "api_endpoint": "converse",
             "aws_region": "us-east-1",
-            "guardrail_enabled": True,
-            "guardrail_intervened": False,
-            "stop_reason": "end_turn",
             "fallback_used": False,
-        },
+        }
     )
-    runtime = SimpleNamespace(provider=provider)
 
-    line = _provider_line(Settings(provider_name="bedrock"), runtime)
-
+    assert "provider=bedrock" in line
+    assert "model=us.amazon.nova-2-lite-v1:0" in line
     assert "endpoint=converse" in line
     assert "region=us-east-1" in line
-    assert "guardrail=enabled" in line
-    assert "stop=end_turn" in line
+    assert "fallback=not used" in line
 
 
-def test_remove_online_id_is_local_and_never_calls_chat(monkeypatch, capsys):
-    calls = []
-    provider = DeterministicProvider()
-    catalog = SimpleNamespace(
-        routes=lambda: [SimpleNamespace(name="online_id_recovery")],
-        deactivate=lambda name: calls.append(("deactivate", name)),
-        revision=2,
-        errors=[],
+def test_member_cli_sends_plain_conversation_over_websocket(monkeypatch, capsys):
+    socket = _FakeSocket(
+        [
+            {
+                "type": "session.ready",
+                "session_id": "member-1",
+                "catalog_revision": 7,
+            },
+            {"type": "turn.accepted", "final": False},
+            {
+                "type": "assistant.request_input",
+                "content": "Which account would you like?",
+                "final": False,
+            },
+            {
+                "type": "turn.completed",
+                "final": True,
+                "metadata": {
+                    "provider": "deterministic",
+                    "model": "deterministic-catalog-router",
+                    "fallback_used": False,
+                },
+            },
+        ]
     )
-    runtime = SimpleNamespace(
-        provider=provider,
-        catalog=catalog,
-        chat=lambda *_: calls.append(("chat",)) or None,
-        close=lambda: None,
-    )
-    messages = iter(["/remove-online-id", "/quit"])
-    monkeypatch.setattr(
-        "member_assistant.cli.AgentRuntime.from_settings", lambda settings: runtime
-    )
-    monkeypatch.setattr("builtins.input", lambda _: next(messages))
+    monkeypatch.setattr("websockets.sync.client.connect", lambda _: socket)
+    messages = iter(["what is my balance"])
 
-    assert main(["--provider", "mock", "--trace", "off"]) == 0
+    def member_input(_):
+        try:
+            return next(messages)
+        except StopIteration as exc:
+            raise EOFError from exc
 
-    assert calls == [("deactivate", "online_id_recovery")]
-    assert "Deactivated online-ID recovery" in capsys.readouterr().out
+    monkeypatch.setattr("builtins.input", member_input)
+
+    assert main(["--session", "member-1", "--url", "ws://testserver"]) == 0
+
+    assert len(socket.sent) == 1
+    assert socket.sent[0]["type"] == "member.message"
+    assert socket.sent[0]["content"] == "what is my balance"
+    output = capsys.readouterr().out
+    assert "Connected (catalog revision 7)" in output
+    assert "assistant> Which account would you like?" in output
+    assert "provider=deterministic" in output
+    assert "/skills" not in output
 
 
-def test_unknown_slash_command_stays_local(monkeypatch, capsys):
-    calls = []
-    provider = DeterministicProvider()
-    runtime = SimpleNamespace(
-        provider=provider,
-        catalog=SimpleNamespace(routes=lambda: [], revision=1, errors=[]),
-        chat=lambda *_: calls.append(("chat",)) or None,
-        close=lambda: None,
-    )
-    messages = iter(["/typo", "/quit"])
-    monkeypatch.setattr(
-        "member_assistant.cli.AgentRuntime.from_settings", lambda settings: runtime
-    )
-    monkeypatch.setattr("builtins.input", lambda _: next(messages))
+def test_admin_cli_inspects_skills_outside_member_chat(tmp_path, capsys):
+    catalog = tmp_path / "catalog"
+    import shutil
 
-    assert main(["--provider", "mock", "--trace", "off"]) == 0
+    shutil.copytree(PROJECT_ROOT / "skills" / "catalog", catalog)
 
-    assert calls == []
-    assert "Unknown local command" in capsys.readouterr().out
+    assert admin_main(["--catalog", str(catalog), "skills"]) == 0
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["catalog_revision"] >= 1
+    assert any(skill["name"] == "guided_balance" for skill in output["skills"])
 
 
 def test_skill_cli_validates_publishes_and_lists_active_catalog(tmp_path, capsys):
