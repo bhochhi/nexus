@@ -108,6 +108,8 @@ class TurnAnalysis:
     slot_updates: List[SlotUpdate] = field(default_factory=list)
     conversation_act: str = "unknown"
     active_goal_relation: str = "none"
+    sentiment: str = "unknown"
+    sentiment_confidence: float = 0.0
     safety_intervened: bool = False
     safety_response: Optional[str] = None
 

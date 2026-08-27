@@ -31,7 +31,7 @@ def test_hot_discovery_then_interrupt_and_resume(runtime_factory):
     assert runtime.graph is original_graph
 
     interrupted = runtime.chat("interrupt", "I forgot my online ID")
-    assert "online-id-recovery" in interrupted.text
+    assert "online-id recovery" in interrupted.text.casefold()
     assert "resume or discard" in interrupted.text
     state = runtime.inspect_state("interrupt")
     assert state["paused_tasks"][0]["skill_name"] == "guided_balance"

@@ -251,11 +251,33 @@ def test_live_agent_handoff(runtime_factory):
 
     reply = runtime.chat("handoff", "yes")
 
-    assert "mock live agent" in reply.text
-    assert "CASE-" in reply.text
-    assert reply.outcome["status"] == "queued"
-    assert "Goal:" in reply.outcome["summary"]
+    assert "what would you like" in reply.text
+
+    queue_question = runtime.chat(
+        "handoff", "I need help with a problem in my credit card balance"
+    )
+    assert "insurance, banking, or financial advice" in queue_question.text
+
+    queued = runtime.chat("handoff", "banking")
+    assert "banking live-support queue" in queued.text
+    assert "CASE-" in queued.text
+    assert queued.outcome["status"] == "queued"
+    assert queued.outcome["queue"] == "banking"
+    assert "Goal:" in queued.outcome["summary"]
     assert runtime.inspect_state("handoff")["handoff_status"] == "queued"
+
+
+def test_repeated_negative_sentiment_offers_live_support(runtime_factory):
+    runtime = runtime_factory()
+
+    first = runtime.chat("sentiment-escalation", "I have a problem with something")
+    assert "Would you like me to connect" not in first.text
+
+    second = runtime.chat("sentiment-escalation", "This is still wrong and I am worried")
+    assert "Would you like me to connect" in second.text
+    state = runtime.inspect_state("sentiment-escalation")
+    assert state["sentiment"] == "negative"
+    assert state["negative_sentiment_streak"] >= 2
 
 
 def test_greeting_loads_mock_member_profile_and_explains_capabilities(runtime_factory):

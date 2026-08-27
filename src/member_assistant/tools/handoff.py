@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 @dataclass(frozen=True)
 class HandoffRequest:
     reason: str
+    queue: str
     active_goal: str
     completed_steps: List[str]
 
@@ -24,7 +25,52 @@ class MockHandoffTool:
     name = "mock_live_agent"
     actions = ("create",)
 
+    @staticmethod
+    def derive_queue(reason: str, requested_queue: str, active_goal: str) -> str:
+        requested = requested_queue.strip().casefold()
+        if requested in {"insurance", "banking", "advice"}:
+            return requested
+        context = "{} {} {}".format(reason, requested_queue, active_goal).casefold()
+        insurance_terms = (
+            "insurance",
+            "policy",
+            "coverage",
+            "claim",
+            "premium",
+            "auto",
+            "homeowners",
+            "life insurance",
+        )
+        banking_terms = (
+            "bank",
+            "balance",
+            "checking",
+            "savings",
+            "credit card",
+            "debit card",
+            "transaction",
+            "transfer",
+            "deposit",
+            "account",
+        )
+        advice_terms = (
+            "advice",
+            "advisor",
+            "planning",
+            "retirement",
+            "financial plan",
+            "invest",
+        )
+        if any(term in context for term in insurance_terms):
+            return "insurance"
+        if any(term in context for term in banking_terms):
+            return "banking"
+        if any(term in context for term in advice_terms):
+            return "advice"
+        return "advice"
+
     def create(self, request: HandoffRequest) -> HandoffReceipt:
+        queue = self.derive_queue(request.reason, request.queue, request.active_goal)
         summary = "Goal: {}. Completed: {}. Reason: {}.".format(
             request.active_goal or "general assistance",
             ", ".join(request.completed_steps) if request.completed_steps else "none",
@@ -33,7 +79,7 @@ class MockHandoffTool:
         digest = hashlib.sha256(summary.encode("utf-8")).hexdigest()[:8].upper()
         return HandoffReceipt(
             case_id="CASE-{}".format(digest),
-            queue="member-support",
+            queue=queue,
             status="queued",
             summary=summary,
         )
@@ -44,6 +90,7 @@ class MockHandoffTool:
         receipt = self.create(
             HandoffRequest(
                 reason=str(arguments.get("reason", "member requested a person")),
+                queue=str(arguments.get("queue", "")),
                 active_goal=str(arguments.get("active_goal", "general assistance")),
                 completed_steps=list(arguments.get("completed_steps", [])),
             )

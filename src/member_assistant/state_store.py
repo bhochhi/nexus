@@ -90,6 +90,55 @@ class SQLiteConversationStore:
             "CREATE INDEX IF NOT EXISTS idx_conversation_events_session_id "
             "ON conversation_events(session_id, id)"
         )
+        self._connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS live_support_cases (
+                case_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                member_name TEXT NOT NULL,
+                queue TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                sentiment TEXT NOT NULL,
+                sentiment_confidence REAL NOT NULL,
+                status TEXT NOT NULL,
+                agent_id TEXT,
+                agent_name TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                ended_by TEXT
+            )
+            """
+        )
+        self._connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS live_support_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_id TEXT NOT NULL UNIQUE,
+                case_id TEXT NOT NULL,
+                sender_type TEXT NOT NULL,
+                sender_name TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_live_support_queue_status "
+            "ON live_support_cases(queue, status, created_at)"
+        )
+        self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_live_support_session_status "
+            "ON live_support_cases(session_id, status, created_at)"
+        )
+        self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_live_support_agent_status "
+            "ON live_support_cases(agent_id, status, updated_at)"
+        )
+        self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_live_support_messages_case "
+            "ON live_support_messages(case_id, id)"
+        )
         self._connection.commit()
         self.cleanup_expired()
         if self.session_ttl_seconds > 0:
@@ -357,6 +406,298 @@ class SQLiteConversationStore:
             }
             for row in rows
         ]
+
+    @staticmethod
+    def _live_case(row: sqlite3.Row) -> Dict[str, Any]:
+        return {
+            "case_id": row["case_id"],
+            "session_id": row["session_id"],
+            "member_name": row["member_name"],
+            "queue": row["queue"],
+            "reason": row["reason"],
+            "summary": row["summary"],
+            "sentiment": row["sentiment"],
+            "sentiment_confidence": float(row["sentiment_confidence"]),
+            "status": row["status"],
+            "agent_id": row["agent_id"],
+            "agent_name": row["agent_name"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "ended_by": row["ended_by"],
+        }
+
+    def create_live_case(
+        self,
+        *,
+        case_id: str,
+        session_id: str,
+        member_name: str,
+        queue: str,
+        reason: str,
+        summary: str,
+        sentiment: str,
+        sentiment_confidence: float,
+    ) -> Dict[str, Any]:
+        """Create one idempotent waiting handoff for a member session."""
+
+        timestamp = self._now().isoformat()
+        with self._lock:
+            active = self._connection.execute(
+                """
+                SELECT * FROM live_support_cases
+                WHERE session_id = ? AND status IN ('waiting', 'connected')
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                (session_id,),
+            ).fetchone()
+            if active is not None:
+                return self._live_case(active)
+            self._connection.execute(
+                """
+                INSERT OR IGNORE INTO live_support_cases(
+                    case_id, session_id, member_name, queue, reason, summary,
+                    sentiment, sentiment_confidence, status, agent_id, agent_name,
+                    created_at, updated_at, ended_by
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'waiting', NULL, NULL, ?, ?, NULL)
+                """,
+                (
+                    case_id,
+                    session_id,
+                    member_name,
+                    queue,
+                    reason,
+                    summary,
+                    sentiment,
+                    max(0.0, min(1.0, float(sentiment_confidence))),
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            self._connection.commit()
+            row = self._connection.execute(
+                "SELECT * FROM live_support_cases WHERE case_id = ?", (case_id,)
+            ).fetchone()
+        if row is None:  # pragma: no cover - defensive database invariant
+            raise RuntimeError("live-support case was not created")
+        return self._live_case(row)
+
+    def live_case(self, case_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM live_support_cases WHERE case_id = ?", (case_id,)
+            ).fetchone()
+        return self._live_case(row) if row is not None else None
+
+    def active_live_case(self, session_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT * FROM live_support_cases
+                WHERE session_id = ? AND status IN ('waiting', 'connected')
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                (session_id,),
+            ).fetchone()
+        return self._live_case(row) if row is not None else None
+
+    def waiting_live_cases(self, queue: Optional[str] = None) -> List[Dict[str, Any]]:
+        parameters: List[Any] = []
+        clause = "status = 'waiting'"
+        if queue is not None:
+            clause += " AND queue = ?"
+            parameters.append(queue)
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM live_support_cases WHERE {} ORDER BY created_at".format(
+                    clause
+                ),
+                parameters,
+            ).fetchall()
+        return [self._live_case(row) for row in rows]
+
+    def agent_live_cases(self, agent_id: str) -> List[Dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                """
+                SELECT * FROM live_support_cases
+                WHERE agent_id = ? AND status = 'connected'
+                ORDER BY updated_at DESC
+                """,
+                (agent_id,),
+            ).fetchall()
+        return [self._live_case(row) for row in rows]
+
+    def assign_live_case(
+        self, case_id: str, agent_id: str, agent_name: str
+    ) -> Optional[Dict[str, Any]]:
+        timestamp = self._now().isoformat()
+        with self._lock:
+            cursor = self._connection.execute(
+                """
+                UPDATE live_support_cases
+                SET status = 'connected', agent_id = ?, agent_name = ?, updated_at = ?
+                WHERE case_id = ? AND status = 'waiting'
+                """,
+                (agent_id, agent_name, timestamp, case_id),
+            )
+            self._connection.commit()
+            if cursor.rowcount != 1:
+                return None
+            row = self._connection.execute(
+                "SELECT * FROM live_support_cases WHERE case_id = ?", (case_id,)
+            ).fetchone()
+        return self._live_case(row) if row is not None else None
+
+    def requeue_agent_cases(self, agent_id: str) -> List[Dict[str, Any]]:
+        timestamp = self._now().isoformat()
+        with self._lock:
+            rows = self._connection.execute(
+                """
+                SELECT * FROM live_support_cases
+                WHERE agent_id = ? AND status = 'connected'
+                """,
+                (agent_id,),
+            ).fetchall()
+            case_ids = [row["case_id"] for row in rows]
+            self._connection.execute(
+                """
+                UPDATE live_support_cases
+                SET status = 'waiting', agent_id = NULL, agent_name = NULL,
+                    updated_at = ?
+                WHERE agent_id = ? AND status = 'connected'
+                """,
+                (timestamp, agent_id),
+            )
+            self._connection.commit()
+            refreshed = [
+                self._connection.execute(
+                    "SELECT * FROM live_support_cases WHERE case_id = ?", (case_id,)
+                ).fetchone()
+                for case_id in case_ids
+            ]
+        return [self._live_case(row) for row in refreshed if row is not None]
+
+    def requeue_all_live_cases(self) -> int:
+        """Recover assignments whose in-process agent presence was lost on restart."""
+
+        with self._lock:
+            cursor = self._connection.execute(
+                """
+                UPDATE live_support_cases
+                SET status = 'waiting', agent_id = NULL, agent_name = NULL,
+                    updated_at = ?
+                WHERE status = 'connected'
+                """,
+                (self._now().isoformat(),),
+            )
+            self._connection.commit()
+        return max(0, cursor.rowcount)
+
+    def update_live_sentiment(
+        self, case_id: str, sentiment: str, confidence: float
+    ) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            cursor = self._connection.execute(
+                """
+                UPDATE live_support_cases
+                SET sentiment = ?, sentiment_confidence = ?, updated_at = ?
+                WHERE case_id = ? AND status IN ('waiting', 'connected')
+                """,
+                (
+                    sentiment,
+                    max(0.0, min(1.0, float(confidence))),
+                    self._now().isoformat(),
+                    case_id,
+                ),
+            )
+            self._connection.commit()
+            row = self._connection.execute(
+                "SELECT * FROM live_support_cases WHERE case_id = ?", (case_id,)
+            ).fetchone()
+        return self._live_case(row) if row is not None else None
+
+    def finish_live_case(
+        self, case_id: str, *, status: str, ended_by: str
+    ) -> Optional[Dict[str, Any]]:
+        if status not in {"ended", "cancelled"}:
+            raise ValueError("unsupported live-support terminal status")
+        with self._lock:
+            cursor = self._connection.execute(
+                """
+                UPDATE live_support_cases
+                SET status = ?, ended_by = ?, updated_at = ?
+                WHERE case_id = ? AND status IN ('waiting', 'connected')
+                """,
+                (status, ended_by, self._now().isoformat(), case_id),
+            )
+            self._connection.commit()
+            if cursor.rowcount != 1:
+                return None
+            row = self._connection.execute(
+                "SELECT * FROM live_support_cases WHERE case_id = ?", (case_id,)
+            ).fetchone()
+        return self._live_case(row) if row is not None else None
+
+    def append_live_message(
+        self,
+        *,
+        message_id: str,
+        case_id: str,
+        sender_type: str,
+        sender_name: str,
+        content: str,
+    ) -> Dict[str, Any]:
+        timestamp = self._now().isoformat()
+        with self._lock:
+            cursor = self._connection.execute(
+                """
+                INSERT OR IGNORE INTO live_support_messages(
+                    message_id, case_id, sender_type, sender_name, content, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (message_id, case_id, sender_type, sender_name, content, timestamp),
+            )
+            self._connection.commit()
+            row = self._connection.execute(
+                """
+                SELECT message_id, case_id, sender_type, sender_name, content, created_at
+                FROM live_support_messages WHERE message_id = ?
+                """,
+                (message_id,),
+            ).fetchone()
+        if row is None:  # pragma: no cover - defensive database invariant
+            raise RuntimeError("live-support message was not stored")
+        if row["case_id"] != case_id or row["content"] != content:
+            raise ValueError("message_id was already used with different content")
+        return {**dict(row), "created": cursor.rowcount == 1}
+
+    def live_messages(self, case_id: str) -> List[Dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                """
+                SELECT message_id, case_id, sender_type, sender_name, content, created_at
+                FROM live_support_messages WHERE case_id = ? ORDER BY id
+                """,
+                (case_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def live_support_snapshot(self) -> Dict[str, Any]:
+        with self._lock:
+            rows = self._connection.execute(
+                """
+                SELECT queue, status, COUNT(*) AS count
+                FROM live_support_cases
+                WHERE status IN ('waiting', 'connected')
+                GROUP BY queue, status
+                """
+            ).fetchall()
+        queues: Dict[str, Dict[str, int]] = {}
+        for row in rows:
+            queues.setdefault(row["queue"], {"waiting": 0, "connected": 0})[
+                row["status"]
+            ] = int(row["count"])
+        return {"queues": queues}
 
     def inspect(self, session_id: str) -> ConversationState:
         return deepcopy(self.load(session_id))

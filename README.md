@@ -26,7 +26,7 @@ warning.
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e '.[dev,observability,bedrock]'
+python -m pip install -e '.[dev,ui,observability,bedrock]'
 ```
 
 Copy the safe template to the default user-secret location and add your API
@@ -56,6 +56,37 @@ The member client contains no catalog, state, or tracing commands. Press
 Ctrl-D or Ctrl-C to leave it. System operations use `member-assistant-admin`,
 skill lifecycle operations use `member-assistant-skills`, and local Langfuse
 operations use `member-assistant-observability`.
+
+### Live MSR demo
+
+The optional Streamlit apps provide a browser member experience and a
+multi-member MSR workspace. Start the API and each UI in a separate terminal:
+
+```bash
+MODEL_PROVIDER=mock member-assistant-server --db data/live-demo.db
+member-assistant-member-ui
+member-assistant-msr-ui
+```
+
+Open the Member UI at `http://localhost:8501` and the MSR UI at
+`http://localhost:8502`. The Member UI asks for a name and Member ID; the
+Member ID is used directly as the durable `session_id`. Opening another Member
+UI with the same ID restores conversation history and receives the same live
+assistant or MSR events.
+
+An MSR supplies a display name and joins exactly one of `insurance`, `banking`,
+or `advice`. Waiting cases are assigned automatically to the online MSR in that
+queue with the fewest active conversations. An MSR can handle several assigned
+members by switching conversation tabs. If nobody is online, the member remains
+in a durable waiting state and can cancel the request.
+
+The handoff skill collects the reason, lets the configured model derive the
+queue, and asks the member to choose a queue when it cannot do so confidently.
+The assigned MSR receives minimized recent context as a system summary and the
+current member-sentiment signal. During live support, member messages bypass
+the conversational graph and route only to the assigned MSR, while sentiment,
+audit, and observability updates continue. Either participant can send `/end`;
+the member is returned to the virtual assistant automatically.
 
 Run the server with the configurable default OpenAI adapter by omitting the
 `MODEL_PROVIDER=mock` prefix. Provider, model, database, catalog, trace, and
@@ -196,9 +227,10 @@ does not cancel or duplicate the durable graph turn.
 This first version streams meaningful conversation events, not hidden model
 reasoning and not raw token deltas. Goal detection remains a structured provider
 call. Longer grounded responses can later add provider token-delta events behind
-the same runtime contract. The socket transport is also the foundation for a
-future live-agent participant and ownership-routing service; this POC still uses
-the existing mock handoff tool and does not yet connect a human agent.
+the same runtime contract. The same socket transport also carries live-agent
+participation and ownership routing for the single-process demo. Durable SQLite
+state remains authoritative; the in-process event hubs can later be replaced
+with a shared broker for a multi-instance deployment.
 
 ## Conversation behavior
 

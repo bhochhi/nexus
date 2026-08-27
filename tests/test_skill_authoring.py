@@ -186,7 +186,7 @@ def test_publication_is_immutable_idempotent_and_rollbackable(tmp_path):
 
     next_source = tmp_path / "next.md"
     next_source.write_text(
-        ONLINE_ID.read_text(encoding="utf-8").replace("3.0.0", "3.1.0", 1),
+        ONLINE_ID.read_text(encoding="utf-8").replace("3.0.1", "3.1.0", 1),
         encoding="utf-8",
     )
     next_receipt = publisher.publish(compiler.compile(next_source))
@@ -195,9 +195,9 @@ def test_publication_is_immutable_idempotent_and_rollbackable(tmp_path):
 
     publisher.activate(first.name, first.version, first.artifact_hash)
     catalog.refresh(force=True)
-    assert catalog.routes()[0].version == "3.0.0"
+    assert catalog.routes()[0].version == first.version
     assert {item["version"] for item in publisher.list_versions(first.name)} == {
-        "3.0.0",
+        first.version,
         "3.1.0",
     }
     assert next_receipt.artifact_hash != first.artifact_hash

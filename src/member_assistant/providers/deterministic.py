@@ -96,7 +96,58 @@ class DeterministicProvider(ModelProvider):
             slot_updates=slot_updates,
             conversation_act="provide_information" if slot_updates else "unknown",
             active_goal_relation="continue" if slot_updates else "none",
+            **self.classify_sentiment(normalized, context),
         )
+
+    @staticmethod
+    def classify_sentiment(
+        normalized_message: str,
+        context: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        normalized = " ".join(normalized_message.casefold().split())
+        frustrated = (
+            "not helping",
+            "this is useless",
+            "so frustrated",
+            "i am frustrated",
+            "terrible service",
+            "ridiculous",
+            "fed up",
+            "angry",
+            "third time",
+        )
+        negative = (
+            "problem",
+            "issue",
+            "wrong",
+            "worried",
+            "concerned",
+            "disappointed",
+            "doesn't work",
+            "does not work",
+            "can't",
+            "cannot",
+        )
+        positive = (
+            "thank you",
+            "thanks",
+            "great",
+            "perfect",
+            "awesome",
+            "appreciate",
+            "helpful",
+        )
+        previous = str((context or {}).get("previous_sentiment") or "unknown")
+        if any(phrase in normalized for phrase in frustrated):
+            return {"sentiment": "frustrated", "sentiment_confidence": 0.96}
+        if any(phrase in normalized for phrase in negative):
+            confidence = 0.88 if previous in {"negative", "frustrated"} else 0.78
+            return {"sentiment": "negative", "sentiment_confidence": confidence}
+        if any(phrase in normalized for phrase in positive):
+            return {"sentiment": "positive", "sentiment_confidence": 0.9}
+        if len(normalized.split()) >= 3:
+            return {"sentiment": "neutral", "sentiment_confidence": 0.7}
+        return {"sentiment": "unknown", "sentiment_confidence": 0.25}
 
     @staticmethod
     def _detect_skill_gap(

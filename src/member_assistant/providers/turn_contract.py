@@ -12,7 +12,8 @@ TURN_UNDERSTANDING_INSTRUCTION = (
     "{\"goals\":[{\"skill_name\":str,\"goal\":str,\"confidence\":number,"
     "\"inputs\":object}],\"slot_updates\":[{\"field\":str,\"value\":any,"
     "\"confidence\":number}],\"conversation_act\":str,"
-    "\"active_goal_relation\":str,\"skill_gap\":null|{\"objective\":str,"
+    "\"active_goal_relation\":str,\"sentiment\":str,"
+    "\"sentiment_confidence\":number,\"skill_gap\":null|{\"objective\":str,"
     "\"category\":str,\"confidence\":number}}. Use only the supplied skills for "
     "goals. Do not infer financial data. Each returned goal must exactly equal one "
     "supplied goals[].name value; never return its display_name. An empty goals list "
@@ -37,6 +38,13 @@ TURN_UNDERSTANDING_INSTRUCTION = (
     "ambiguous between them. conversation_act must be one of provide_information, "
     "correction, confirmation, new_goal, clarification_request, greeting, small_talk, "
     "or unknown. active_goal_relation must be continue, replace, ambiguous, or none. "
+    "sentiment must be positive, neutral, negative, frustrated, or unknown. Classify "
+    "the member's current emotional state from this utterance and the supplied recent "
+    "sentiment context. Use frustrated for clear anger, repeated unresolved difficulty, "
+    "or strong dissatisfaction; negative for concern or dissatisfaction without strong "
+    "frustration; neutral for ordinary task-focused language; positive for clear positive "
+    "affect; and unknown only when there is not enough evidence. Return a calibrated "
+    "sentiment_confidence from 0 to 1. "
     "Set skill_gap only when the member expresses a clear objective that none of the "
     "supplied skills supports. Do not use skill_gap for greetings, small talk, unclear "
     "fragments, or plausible slot answers. Write objective as a short sanitized verb "
@@ -170,6 +178,14 @@ def parse_turn_analysis(
     if active_goal_relation not in {"continue", "replace", "ambiguous", "none"}:
         active_goal_relation = "none"
 
+    sentiment = str(parsed.get("sentiment", "unknown")).strip().casefold()
+    if sentiment not in {"positive", "neutral", "negative", "frustrated", "unknown"}:
+        sentiment = "unknown"
+    try:
+        sentiment_confidence = float(parsed.get("sentiment_confidence", 0.0))
+    except (TypeError, ValueError):
+        sentiment_confidence = 0.0
+
     raw_gap = parsed.get("skill_gap")
     skill_gap = None
     if isinstance(raw_gap, dict):
@@ -196,4 +212,6 @@ def parse_turn_analysis(
         slot_updates=slot_updates,
         conversation_act=conversation_act,
         active_goal_relation=active_goal_relation,
+        sentiment=sentiment,
+        sentiment_confidence=max(0.0, min(1.0, sentiment_confidence)),
     )

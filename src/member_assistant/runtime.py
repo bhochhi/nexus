@@ -288,6 +288,10 @@ class AgentRuntime:
                             "catalog_revision", self.catalog.revision
                         ),
                         "turn": final_conversation["turn_count"],
+                        "sentiment": final_conversation.get("sentiment", "unknown"),
+                        "sentiment_confidence": final_conversation.get(
+                            "sentiment_confidence", 0.0
+                        ),
                         **self.provider.observability_metadata(),
                     }
                     completed_event = new_event(
@@ -322,6 +326,12 @@ class AgentRuntime:
                             ),
                             "no_goal_turn_count": final_conversation.get(
                                 "no_goal_turn_count", 0
+                            ),
+                            "sentiment": final_conversation.get(
+                                "sentiment", "unknown"
+                            ),
+                            "negative_sentiment_streak": final_conversation.get(
+                                "negative_sentiment_streak", 0
                             ),
                             "turn": final_conversation["turn_count"],
                         },
@@ -379,6 +389,13 @@ class AgentRuntime:
                     "no_goal_turn_count": final_conversation.get(
                         "no_goal_turn_count", 0
                     ),
+                    "sentiment": final_conversation.get("sentiment", "unknown"),
+                    "sentiment_confidence": final_conversation.get(
+                        "sentiment_confidence", 0.0
+                    ),
+                    "negative_sentiment_streak": final_conversation.get(
+                        "negative_sentiment_streak", 0
+                    ),
                     "catalog_revision": result.get(
                         "catalog_revision", self.catalog.revision
                     ),
@@ -422,6 +439,153 @@ class AgentRuntime:
 
     def inspect_state(self, session_id: str) -> ConversationState:
         return self.store.inspect(session_id)
+
+    def set_member_name(self, session_id: str, name: str) -> ConversationState:
+        """Persist the UI-supplied display name without changing session identity."""
+
+        clean_name = " ".join(str(name).split())[:80]
+        if not clean_name:
+            raise ValueError("member name must not be empty")
+        with self._session_lock(session_id):
+            conversation = self.store.load(session_id)
+            conversation["member_profile"] = {
+                **conversation.get("member_profile", {}),
+                "member_ref": session_id,
+                "first_name": clean_name.split()[0],
+                "preferred_name": clean_name,
+            }
+            self.store.save(session_id, conversation)
+        return deepcopy(conversation)
+
+    def analyze_live_sentiment(self, session_id: str, message: str) -> Dict[str, Any]:
+        """Classify a live member utterance while preserving conversational context."""
+
+        conversation = self.store.load(session_id)
+        context = {
+            "previous_sentiment": conversation.get("sentiment", "unknown"),
+            "negative_sentiment_streak": conversation.get(
+                "negative_sentiment_streak", 0
+            ),
+            "recent_member_messages": [
+                item.get("content", "")[:240]
+                for item in conversation.get("messages", [])[-8:]
+                if item.get("role") == "user"
+            ],
+        }
+        with self.observability.observe(
+            "llm.live_sentiment",
+            "generation",
+            input_value=self.observability.content(
+                {"message": message, "context": context},
+                {
+                    "message_length": len(message),
+                    "context_message_count": len(context["recent_member_messages"]),
+                    "content_redacted": True,
+                },
+            ),
+            metadata=self.provider.observability_metadata(),
+        ) as observation:
+            fallback_used = False
+            try:
+                analysis = self.provider.understand_turn(message, [], context)
+            except Exception:
+                fallback_used = True
+                analysis = DeterministicProvider().understand_turn(
+                    message, [], context
+                )
+            observation.update(
+                output={
+                    "sentiment": analysis.sentiment,
+                    "confidence": analysis.sentiment_confidence,
+                },
+                metadata={
+                    **self.provider.observability_metadata(),
+                    "fallback_used": fallback_used,
+                },
+            )
+        if analysis.sentiment == "unknown":
+            fallback = DeterministicProvider().understand_turn(message, [], context)
+            sentiment = fallback.sentiment
+            confidence = fallback.sentiment_confidence
+        else:
+            sentiment = analysis.sentiment
+            confidence = analysis.sentiment_confidence
+        with self._session_lock(session_id):
+            conversation = self.store.load(session_id)
+            conversation["messages"].append({"role": "user", "content": message})
+            self._apply_sentiment(conversation, sentiment, confidence)
+            self.store.save(session_id, conversation)
+            self.store.append_audit(
+                session_id,
+                "live_sentiment_updated",
+                {
+                    "sentiment": sentiment,
+                    "confidence": confidence,
+                    "negative_sentiment_streak": conversation.get(
+                        "negative_sentiment_streak", 0
+                    ),
+                },
+            )
+        return {"sentiment": sentiment, "confidence": confidence}
+
+    def end_handoff(self, session_id: str, ended_by: str) -> Dict[str, Any]:
+        """Return a member to the virtual assistant and emit a durable welcome-back."""
+
+        content = (
+            "You're back with the virtual assistant. What else can I help you with?"
+        )
+        with self._session_lock(session_id):
+            conversation = self.store.load(session_id)
+            conversation["handoff_status"] = "ended"
+            conversation["selected_skill"] = None
+            conversation["outcome"] = {
+                "status": "ended",
+                "ended_by": ended_by,
+            }
+            conversation["messages"].append(
+                {"role": "assistant", "content": content}
+            )
+            self.store.save(session_id, conversation)
+            turn_id = "turn_live_end_{}".format(uuid.uuid4().hex)
+            event = AssistantEvent.create(
+                session_id=session_id,
+                turn_id=turn_id,
+                sequence=1,
+                event_type="assistant.message",
+                content=content,
+                final=True,
+                metadata={"message_kind": "handoff_return", "ended_by": ended_by},
+            )
+            self.store.append_event(event)
+            self.store.append_audit(
+                session_id,
+                "live_handoff_ended",
+                {"ended_by": ended_by},
+            )
+        return event.as_dict()
+
+    def handoff_summary(self, session_id: str, reason: str) -> str:
+        """Build minimized recent context for the assigned MSR."""
+
+        conversation = self.store.load(session_id)
+        active = conversation.get("active_task")
+        lines = ["Reason: {}.".format(" ".join(reason.split())[:300])]
+        if active:
+            lines.append("Active goal: {}.".format(active.get("goal", "general assistance")))
+            completed = active.get("completed_steps", [])
+            if completed:
+                lines.append("Completed: {}.".format(", ".join(completed[-4:])))
+        recent = conversation.get("messages", [])[-6:]
+        if recent:
+            context = " | ".join(
+                "{}: {}".format(
+                    "Member" if item.get("role") == "user" else "Assistant",
+                    " ".join(str(item.get("content", "")).split())[:220],
+                )
+                for item in recent
+            )
+            lines.append("Recent context: {}".format(context))
+        return " ".join(lines)[:1800]
 
     def close(self) -> None:
         self.catalog.stop()
@@ -563,6 +727,10 @@ class AgentRuntime:
             "pending_task_transition": bool(
                 conversation.get("pending_task_transition")
             ),
+            "previous_sentiment": conversation.get("sentiment", "unknown"),
+            "negative_sentiment_streak": conversation.get(
+                "negative_sentiment_streak", 0
+            ),
         }
         with self.observability.observe(
             "llm.turn_understanding",
@@ -676,6 +844,14 @@ class AgentRuntime:
             active_goal_relation = provider_analysis.active_goal_relation
             if active_goal_relation == "none":
                 active_goal_relation = deterministic_analysis.active_goal_relation
+            sentiment = provider_analysis.sentiment
+            sentiment_confidence = provider_analysis.sentiment_confidence
+            if sentiment == "unknown":
+                sentiment = deterministic_analysis.sentiment
+                sentiment_confidence = deterministic_analysis.sentiment_confidence
+            self._apply_sentiment(
+                conversation, sentiment, sentiment_confidence
+            )
             generation_output = {
                 "goal_count": len(goal_matches),
                 "candidates": [
@@ -703,6 +879,11 @@ class AgentRuntime:
                 ),
                 "conversation_act": conversation_act,
                 "active_goal_relation": active_goal_relation,
+                "sentiment": sentiment,
+                "sentiment_confidence": sentiment_confidence,
+                "negative_sentiment_streak": conversation.get(
+                    "negative_sentiment_streak", 0
+                ),
                 "slot_update_count": len(slot_updates),
                 "slot_update_fields": [
                     field_name
@@ -823,14 +1004,22 @@ class AgentRuntime:
         handoff_requested = any(
             self._is_handoff_goal(goal, catalog) for goal in deterministic_goals
         )
-        if handoff_requested or self._is_frustrated(message):
+        sentiment_escalation = (
+            conversation.get("sentiment") == "frustrated"
+            or int(conversation.get("negative_sentiment_streak", 0)) >= 2
+        )
+        active_is_handoff = bool(active_route and active_route.risk_tier == "handoff")
+        if (
+            not active_is_handoff
+            and (handoff_requested or self._is_frustrated(message) or sentiment_escalation)
+        ):
             return self._offer_handoff(
                 updates,
                 conversation,
                 reason=(
                     "member explicitly requested a live agent"
                     if handoff_requested
-                    else "member expressed frustration"
+                    else "member sentiment indicates additional support is appropriate"
                 ),
             )
 
@@ -922,7 +1111,12 @@ class AgentRuntime:
             return updates
 
         if active and active.get("status") == "awaiting_input":
-            if self._has_explicit_new_goal(active, message, goals, deterministic_goals):
+            if (
+                not active_is_handoff
+                and self._has_explicit_new_goal(
+                    active, message, goals, deterministic_goals
+                )
+            ):
                 return self._route_goal_candidates(
                     updates, conversation, message, goals, deterministic_goals
                 )
@@ -1116,9 +1310,6 @@ class AgentRuntime:
                 conversation["paused_tasks"][0] if conversation["paused_tasks"] else None
             )
             handoff_inputs = handoff_goal.setdefault("inputs", {})
-            handoff_inputs.setdefault(
-                "reason", "member requested a person or expressed frustration"
-            )
             handoff_inputs.setdefault(
                 "active_goal",
                 active_context.get("goal", "general assistance")
@@ -1980,7 +2171,6 @@ class AgentRuntime:
             "goal": definition.supported_goals[0]["name"],
             "confidence": 1.0,
             "inputs": {
-                "reason": offer["reason"],
                 "active_goal": offer["active_goal"],
                 "completed_steps": list(offer.get("completed_steps", [])),
             },
@@ -2148,6 +2338,32 @@ class AgentRuntime:
                 "terrible service",
             )
         )
+
+    @staticmethod
+    def _apply_sentiment(
+        conversation: ConversationState, sentiment: str, confidence: float
+    ) -> None:
+        normalized = sentiment if sentiment in {
+            "positive",
+            "neutral",
+            "negative",
+            "frustrated",
+            "unknown",
+        } else "unknown"
+        conversation["sentiment"] = normalized
+        conversation["sentiment_confidence"] = max(
+            0.0, min(1.0, float(confidence))
+        )
+        if normalized == "frustrated":
+            conversation["negative_sentiment_streak"] = max(
+                2, int(conversation.get("negative_sentiment_streak", 0)) + 1
+            )
+        elif normalized == "negative":
+            conversation["negative_sentiment_streak"] = int(
+                conversation.get("negative_sentiment_streak", 0)
+            ) + 1
+        elif normalized in {"positive", "neutral"}:
+            conversation["negative_sentiment_streak"] = 0
 
     @staticmethod
     def _is_explicit_multi_goal(message: str) -> bool:

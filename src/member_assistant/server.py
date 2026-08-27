@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnec
 from pydantic import BaseModel
 
 from member_assistant.events import AssistantEvent
+from member_assistant.live_support import LiveSupportBroker
 from member_assistant.runtime import AgentRuntime
 
 
@@ -98,7 +99,22 @@ def create_app(
     owns_runtime = runtime is None if close_runtime is None else close_runtime
     active_runtime = runtime or AgentRuntime.from_settings()
     event_hub = SessionEventHub()
+    agent_event_hub = SessionEventHub()
     turn_tasks: Set["asyncio.Task[None]"] = set()
+
+    async def publish_member(session_id: str, event: Dict[str, Any]) -> None:
+        await event_hub.publish(session_id, event)
+
+    async def publish_agent(agent_id: str, event: Dict[str, Any]) -> None:
+        await agent_event_hub.publish(agent_id, event)
+
+    live_broker = LiveSupportBroker(
+        active_runtime.store,
+        publish_member=publish_member,
+        publish_agent=publish_agent,
+        analyze_sentiment=active_runtime.analyze_live_sentiment,
+        handoff_ended=active_runtime.end_handoff,
+    )
 
     async def run_turn(
         session_id: str, content: str, client_message_id: str
@@ -113,6 +129,30 @@ def create_app(
             async for event in _async_events(stream):
                 terminal_published = terminal_published or event.final
                 await event_hub.publish(session_id, event.as_dict())
+            state = active_runtime.inspect_state(session_id)
+            outcome = state.get("outcome") or {}
+            if (
+                state.get("handoff_status") == "queued"
+                and outcome.get("case_id")
+                and outcome.get("queue")
+            ):
+                reason = str(outcome.get("reason") or "member requested live support")
+                await live_broker.enqueue(
+                    case_id=str(outcome["case_id"]),
+                    session_id=session_id,
+                    member_name=str(
+                        state.get("member_profile", {}).get(
+                            "preferred_name", "Member"
+                        )
+                    ),
+                    queue=str(outcome["queue"]),
+                    reason=reason,
+                    summary=active_runtime.handoff_summary(session_id, reason),
+                    sentiment=str(state.get("sentiment", "unknown")),
+                    sentiment_confidence=float(
+                        state.get("sentiment_confidence", 0.0)
+                    ),
+                )
         except Exception:
             if not terminal_published:
                 await event_hub.publish(
@@ -149,6 +189,8 @@ def create_app(
     )
     app.state.runtime = active_runtime
     app.state.event_hub = event_hub
+    app.state.agent_event_hub = agent_event_hub
+    app.state.live_support = live_broker
 
     @app.get("/health")
     async def health() -> Dict[str, Any]:
@@ -160,6 +202,10 @@ def create_app(
             "provider": metadata.get("provider"),
             "model": metadata.get("model"),
         }
+
+    @app.get("/v1/live-support/status")
+    async def live_support_status() -> Dict[str, Any]:
+        return live_broker.queue_snapshot()
 
     @app.post("/v1/sessions")
     async def create_session(request: SessionRequest) -> Dict[str, Any]:
@@ -229,12 +275,24 @@ def create_app(
                 break
             if buffered.get("event_id") not in replayed_event_ids:
                 await websocket.send_json(buffered)
+        ready_case = active_runtime.store.active_live_case(session_id)
+        if ready_case is not None:
+            ready_case = {
+                **ready_case,
+                "messages": active_runtime.store.live_messages(
+                    ready_case["case_id"]
+                ),
+            }
         await websocket.send_json(
             {
                 "type": "session.ready",
                 "session_id": session_id,
                 "catalog_revision": active_runtime.catalog.revision,
                 "replayed_event_count": len(replay),
+                "messages": active_runtime.inspect_state(session_id).get(
+                    "messages", []
+                ),
+                "live_case": ready_case,
             }
         )
 
@@ -254,6 +312,41 @@ def create_app(
                     await outgoing.put(
                         {"type": "session.pong", "session_id": session_id}
                     )
+                    continue
+                if request_type == "member.join":
+                    try:
+                        state = active_runtime.set_member_name(
+                            session_id, str(request.get("name", ""))
+                        )
+                    except ValueError as exc:
+                        await outgoing.put(
+                            {
+                                "type": "protocol.error",
+                                "error": str(exc),
+                                "final": False,
+                            }
+                        )
+                    else:
+                        await outgoing.put(
+                            {
+                                "type": "member.ready",
+                                "session_id": session_id,
+                                "member_name": state.get("member_profile", {}).get(
+                                    "preferred_name", "Member"
+                                ),
+                            }
+                        )
+                    continue
+                if request_type == "live_support.cancel":
+                    cancelled = await live_broker.cancel_waiting(session_id)
+                    if cancelled is None:
+                        await outgoing.put(
+                            {
+                                "type": "protocol.error",
+                                "error": "there is no waiting live-support request to cancel",
+                                "final": False,
+                            }
+                        )
                     continue
                 if request_type != "member.message":
                     await outgoing.put(
@@ -286,11 +379,150 @@ def create_app(
                 client_message_id = str(
                     request.get("message_id") or "msg_{}".format(uuid.uuid4().hex)
                 )
+                active_case = active_runtime.store.active_live_case(session_id)
+                if active_case and active_case.get("status") == "connected":
+                    try:
+                        await live_broker.member_message(
+                            session_id,
+                            content,
+                            message_id=client_message_id,
+                        )
+                    except ValueError as exc:
+                        await outgoing.put(
+                            {
+                                "type": "protocol.error",
+                                "error": str(exc),
+                                "final": False,
+                            }
+                        )
+                    continue
+                if active_case and active_case.get("status") == "waiting":
+                    await outgoing.put(
+                        {
+                            "type": "live_support.waiting",
+                            "case": active_case,
+                            "message": "You are still waiting for an available MSR. Use Cancel live support to return to the virtual assistant.",
+                        }
+                    )
+                    continue
                 schedule_turn(session_id, content, client_message_id)
         except WebSocketDisconnect:
             return
         finally:
             event_hub.unsubscribe(session_id, outgoing)
+            sender.cancel()
+            await asyncio.gather(sender, return_exceptions=True)
+
+    @app.websocket("/v1/live-support/agents/{agent_id}/stream")
+    async def live_agent_socket(websocket: WebSocket, agent_id: str) -> None:
+        await websocket.accept()
+        outgoing = agent_event_hub.subscribe(agent_id)
+        await websocket.send_json(
+            {"type": "agent.connected", "agent_id": agent_id}
+        )
+
+        async def send_agent_events() -> None:
+            while True:
+                await websocket.send_json(await outgoing.get())
+
+        sender = asyncio.create_task(
+            send_agent_events(), name="live-support-agent-sender"
+        )
+        joined = False
+        try:
+            while True:
+                request = await websocket.receive_json()
+                request_type = request.get("type")
+                if request_type == "session.ping":
+                    await outgoing.put({"type": "session.pong", "agent_id": agent_id})
+                    continue
+                if request_type == "agent.join":
+                    try:
+                        ready = await live_broker.join_agent(
+                            agent_id,
+                            str(request.get("name", "")),
+                            str(request.get("queue", "")),
+                        )
+                    except ValueError as exc:
+                        await outgoing.put(
+                            {"type": "protocol.error", "error": str(exc), "final": False}
+                        )
+                    else:
+                        joined = True
+                        await outgoing.put(ready)
+                    continue
+                if not joined:
+                    await outgoing.put(
+                        {
+                            "type": "protocol.error",
+                            "error": "agent.join is required before live-support actions",
+                            "final": False,
+                        }
+                    )
+                    continue
+                if request_type == "agent.message":
+                    content = str(request.get("content", "")).strip()
+                    case_id = str(request.get("case_id", "")).strip()
+                    if not content or not case_id:
+                        await outgoing.put(
+                            {
+                                "type": "protocol.error",
+                                "error": "case_id and content must not be empty",
+                                "final": False,
+                            }
+                        )
+                        continue
+                    if len(content) > MAX_MEMBER_MESSAGE_LENGTH:
+                        await outgoing.put(
+                            {
+                                "type": "protocol.error",
+                                "error": "content exceeds the maximum message length",
+                                "final": False,
+                            }
+                        )
+                        continue
+                    try:
+                        await live_broker.agent_message(
+                            agent_id,
+                            case_id,
+                            content,
+                            message_id=str(
+                                request.get("message_id")
+                                or "live_msg_{}".format(uuid.uuid4().hex)
+                            ),
+                        )
+                    except ValueError as exc:
+                        await outgoing.put(
+                            {"type": "protocol.error", "error": str(exc), "final": False}
+                        )
+                    continue
+                if request_type == "agent.end":
+                    case_id = str(request.get("case_id", "")).strip()
+                    case = active_runtime.store.live_case(case_id)
+                    if not case or case.get("agent_id") != agent_id:
+                        await outgoing.put(
+                            {
+                                "type": "protocol.error",
+                                "error": "case is not assigned to this MSR",
+                                "final": False,
+                            }
+                        )
+                    else:
+                        await live_broker.end_case(case_id, ended_by="agent")
+                    continue
+                await outgoing.put(
+                    {
+                        "type": "protocol.error",
+                        "error": "unsupported live-agent event type",
+                        "final": False,
+                    }
+                )
+        except WebSocketDisconnect:
+            return
+        finally:
+            if joined:
+                await live_broker.leave_agent(agent_id)
+            agent_event_hub.unsubscribe(agent_id, outgoing)
             sender.cancel()
             await asyncio.gather(sender, return_exceptions=True)
 

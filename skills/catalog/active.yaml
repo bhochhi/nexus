@@ -1,5 +1,5 @@
 apiVersion: nexus.catalog/v1
-revision: 16
+revision: 17
 skills:
   approved_knowledge:
     version: 2.0.0
@@ -133,15 +133,16 @@ skills:
           pattern: \bfrom\s+([a-z0-9-]+)(?:\s+account)?\s+to\s+([a-z0-9-]+)
           group: 2
   live_agent_handoff:
-    version: 2.0.0
-    artifact_hash: d47a220466338a6c7a3c3b557d9f0d16aa38839d2ea59085ff114136ea08ab5c
-    artifact: live_agent_handoff/2.0.0/SKILL.md
+    version: 3.0.0
+    artifact_hash: 17eab08fc3de5fcb8824d256f5b840180a80ffe0a6cf305ba08c942d9aad87b9
+    artifact: live_agent_handoff/3.0.0/SKILL.md
     routing:
       name: live_agent_handoff
-      version: 2.0.0
-      artifact_hash: d47a220466338a6c7a3c3b557d9f0d16aa38839d2ea59085ff114136ea08ab5c
+      version: 3.0.0
+      artifact_hash: 17eab08fc3de5fcb8824d256f5b840180a80ffe0a6cf305ba08c942d9aad87b9
       archetype: human_handoff
-      description: Creates a mock live-agent case with minimized context.
+      description: Collects a live-support reason, derives the right queue, and creates
+        a minimized handoff.
       owner: Contact Center Operations
       risk_tier: handoff
       interaction: guided
@@ -158,16 +159,51 @@ skills:
         - talk to someone
         examples:
         - Get me a person.
-        - I want a live agent.
+        - I want a live agent about my auto policy.
       input_schema:
         type: object
+        required:
+        - reason
+        - queue
         properties:
           reason:
             type: string
+            description: The member's concise reason for requesting live support.
+          queue:
+            type: string
+            enum:
+            - insurance
+            - banking
+            - advice
+            description: Derive insurance for policies, coverage, premiums, or claims;
+              banking for accounts, cards, balances, or transactions; and advice for
+              planning or financial guidance.
           active_goal:
             type: string
           completed_steps:
             type: array
             items:
               type: string
-      input_extraction: {}
+      input_extraction:
+        reason:
+          strategy: full_message
+        queue:
+          strategy: alias
+          aliases:
+            insurance: insurance
+            policy: insurance
+            coverage: insurance
+            claim: insurance
+            premium: insurance
+            auto: insurance
+            banking: banking
+            bank: banking
+            account: banking
+            balance: banking
+            credit card: banking
+            debit card: banking
+            transaction: banking
+            advice: advice
+            advisor: advice
+            planning: advice
+            retirement: advice

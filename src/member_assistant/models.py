@@ -66,6 +66,9 @@ class ConversationState(TypedDict):
     outcome: Optional[Dict[str, Any]]
     awaiting_resume: bool
     handoff_status: Optional[str]
+    sentiment: str
+    sentiment_confidence: float
+    negative_sentiment_streak: int
     turn_count: int
 
 
@@ -106,5 +109,8 @@ def new_conversation_state() -> ConversationState:
         "outcome": None,
         "awaiting_resume": False,
         "handoff_status": None,
+        "sentiment": "unknown",
+        "sentiment_confidence": 0.0,
+        "negative_sentiment_streak": 0,
         "turn_count": 0,
     }

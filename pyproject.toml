@@ -29,6 +29,7 @@ observability = [
   "opentelemetry-sdk>=1.33,<1.38",
   "opentelemetry-exporter-otlp-proto-http>=1.33,<1.38",
 ]
+ui = ["streamlit>=1.37,<2"]
 
 [project.scripts]
 member-assistant = "member_assistant.cli:main"
@@ -36,6 +37,8 @@ member-assistant-admin = "member_assistant.admin_cli:main"
 member-assistant-observability = "member_assistant.observability_cli:main"
 member-assistant-server = "member_assistant.server_cli:main"
 member-assistant-skills = "member_assistant.skill_cli:main"
+member-assistant-member-ui = "member_assistant.ui_launcher:member_main"
+member-assistant-msr-ui = "member_assistant.ui_launcher:msr_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

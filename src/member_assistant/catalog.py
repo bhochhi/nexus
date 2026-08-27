@@ -52,7 +52,7 @@ TYPE_WORKFLOW_OPERATIONS = {
     },
     "deterministic_workflow": WORKFLOW_OPERATIONS,
     "navigation": {"call_tool", "collect", "respond"},
-    "human_handoff": {"call_tool", "respond"},
+    "human_handoff": {"call_tool", "collect", "respond"},
 }
 
 

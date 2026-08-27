@@ -14,10 +14,31 @@ answers are rendered only from approved knowledge retrieved by the FAQ skill.
 | Guided skill | `What's my balance?` then `checking` | The assistant asks only for the required account, retains context, and calls the read-only balance capability. |
 | Deterministic skill | `Transfer $50 from checking to savings` then `yes` | It presents an explicit review and does not submit until confirmation. |
 | Interruption and resume | Start `I want to make a transfer`; then ask `What's my checking balance?`; then say `resume` | The transfer is paused, balance is completed, and the exact paused workflow resumes. |
-| Multiple objectives | `Check my checking balance and transfer $25 from checking to savings` | The read-only balance goal is completed first; the consequential transfer is explicitly offered next. |
+| Multiple objectives and streaming | `Check my checking balance and transfer $25 from checking to savings` | The read-only balance goal is completed first; the consequential transfer is explicitly offered next. In the WebSocket client, point out the ordered durable stream: the balance result arrives as a member-visible event before the transfer-continuation prompt, rather than waiting for one monolithic reply. The same event log can be replayed after reconnect. |
 | Slot correction and continuity | Start a transfer; provide slots across several turns; at review say `Actually make it $200` | The same transfer plan stays active, replaces the amount, and requires a new confirmation. |
 | Runtime skill addition | `I forgot my online ID` (before installation), install `online_id_recovery`, then repeat the request | The first request stays safely unsupported. The registered skill becomes routable without a process restart or graph recompilation. |
 | Version upgrade and rollback | With online-ID `3.0.0` active, publish `3.0.1` with the visible response-copy change below; repeat `I forgot my online ID`; then reactivate `3.0.0` and repeat it once more | `active.yaml` moves to a new version/hash and catalog revision. New requests use `3.0.1`; the earlier immutable version remains available for rollback and for in-flight tasks. |
+| Live MSR assignment | In the MSR UI, join `banking`. In the Member UI, ask for a person, answer `yes`, explain `My credit card balance is wrong`, and choose `banking` if asked. | The case is automatically assigned, the MSR receives a system summary, and both UIs switch to human-chat mode. |
+| Live sentiment | While connected, send `I am so frustrated that my balance is still wrong`. | The MSR sentiment rail lights `Frustrated` and the trace records the classification without sending the utterance back through the conversational agent. |
+| End and resume | Send `/end` from either UI. | The MSR tab closes, the member returns to the virtual assistant, and the assistant asks what else it can help with. |
+
+## Live MSR setup
+
+Install the UI extra, then start the API, Member UI, and MSR UI in separate
+terminals:
+
+```bash
+python -m pip install -e '.[dev,ui]'
+MODEL_PROVIDER=mock member-assistant-server --db data/live-demo.db
+member-assistant-member-ui
+member-assistant-msr-ui
+```
+
+Use `http://localhost:8501` for the member and `http://localhost:8502` for the
+MSR. Reuse the same Member ID in a second member window to demonstrate durable
+history and shared real-time responses. Start with no matching MSR online to
+show the waiting and Cancel live support states, then bring an MSR online to
+show automatic assignment.
 
 ## Presenter guardrails
 
