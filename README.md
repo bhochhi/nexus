@@ -146,7 +146,10 @@ confidence threshold, then applies deterministic conversation controls:
   served, the member is asked whether to resume or discard the paused goal.
 - Close alternative goal candidates produce a durable disambiguation question.
   Explicit multi-goal utterances such as “check my balance and transfer $25”
-  remain multiple tasks and are ordered by policy risk.
+  remain multiple tasks and are ordered by policy risk. The assistant announces
+  that plan, completes the first request, and then asks before beginning the next
+  queued request. That transition decision survives a restart and is separate
+  from the final confirmation required to submit a consequential action.
 - Greeting and capability-help behavior is a cross-cutting conversation policy,
   not a business skill competing for selection. A synthetic member-profile tool
   loads the preferred name once per durable session, and the assistant greets
@@ -235,6 +238,7 @@ Common metadata fields are:
 | `outcome=queued` | The mock workflow's terminal status. For handoff, `queued` means a synthetic support case was created. |
 | `goal_clarification` | Whether the runtime is waiting for the member to choose between plausible goals. |
 | `handoff_offer` | Whether a proactive frustration/no-progress handoff offer is waiting for yes/no. It remains `no` for a direct member-requested handoff. |
+| `next_goal_offer` | Whether the assistant finished one explicitly requested goal and is waiting for permission to begin the next queued goal. |
 | `no_goal_turns` | Consecutive turns that did not produce a supported goal; a successful goal resets it to zero. |
 
 For the sample handoff trace, the sequence is: Luna recognized a direct live-agent

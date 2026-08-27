@@ -157,6 +157,9 @@ class AgentRuntime:
                         "handoff_offer_pending": bool(
                             final_conversation.get("pending_handoff_offer")
                         ),
+                        "task_transition_pending": bool(
+                            final_conversation.get("pending_task_transition")
+                        ),
                         "no_goal_turn_count": final_conversation.get(
                             "no_goal_turn_count", 0
                         ),
@@ -186,6 +189,9 @@ class AgentRuntime:
                     ),
                     "handoff_offer_pending": bool(
                         final_conversation.get("pending_handoff_offer")
+                    ),
+                    "task_transition_pending": bool(
+                        final_conversation.get("pending_task_transition")
                     ),
                     "no_goal_turn_count": final_conversation.get(
                         "no_goal_turn_count", 0
@@ -227,6 +233,7 @@ class AgentRuntime:
                 "supply_input": "supply_input",
                 "confirmation": "handle_confirmation",
                 "resume": "handle_resume",
+                "policy": "policy",
                 "finalize": "finalize",
             },
         )
@@ -334,6 +341,9 @@ class AgentRuntime:
                     conversation.get("pending_goal_clarification") or {}
                 ).get("candidates", [])
             ],
+            "pending_task_transition": bool(
+                conversation.get("pending_task_transition")
+            ),
         }
         with self.observability.observe(
             "llm.turn_understanding",
@@ -605,6 +615,59 @@ class AgentRuntime:
                 ),
             )
 
+        pending_transition = conversation.get("pending_task_transition")
+        if pending_transition:
+            queued = conversation.get("queued_tasks", [])
+            next_task = queued[0] if queued else None
+            if not next_task or next_task.get("id") != pending_transition.get("task_id"):
+                conversation["pending_task_transition"] = None
+            elif self._is_affirmative(message):
+                conversation["active_task"] = queued.pop(0)
+                conversation["pending_task_transition"] = None
+                conversation["selected_skill"] = next_task["skill_name"]
+                conversation["outcome"] = None
+                conversation["confirmation_status"] = "not_required"
+                conversation["no_goal_turn_count"] = 0
+                updates.update(goals=[], next_action="policy")
+                return updates
+            elif self._is_negative(message):
+                discarded = queued.pop(0)
+                conversation["pending_task_transition"] = None
+                conversation["outcome"] = {
+                    "status": "discarded",
+                    "task_id": discarded["id"],
+                }
+                response_parts = [
+                    "Okay, I won't continue with that {} request.".format(
+                        pending_transition["goal_label"]
+                    )
+                ]
+                if queued:
+                    transition = self._new_task_transition(queued[0])
+                    conversation["pending_task_transition"] = transition
+                    response_parts.append(transition["question"])
+                updates.update(
+                    goals=[], next_action="finalize", response_parts=response_parts
+                )
+                return updates
+            elif goals:
+                for queued_task in queued:
+                    queued_task["resume_status"] = queued_task.get("status", "ready")
+                    queued_task["status"] = "paused"
+                    conversation["paused_tasks"].append(queued_task)
+                conversation["queued_tasks"] = []
+                conversation["pending_task_transition"] = None
+                return self._route_goal_candidates(
+                    updates, conversation, message, goals, deterministic_goals
+                )
+            else:
+                updates.update(
+                    goals=[],
+                    next_action="finalize",
+                    response_parts=[pending_transition["question"]],
+                )
+                return updates
+
         if active and active.get("status") == "awaiting_confirmation":
             if self._is_yes_or_no(message):
                 updates["next_action"] = "confirmation"
@@ -809,6 +872,7 @@ class AgentRuntime:
         conversation["awaiting_resume"] = False
         conversation["pending_clarification"] = None
         conversation["pending_goal_clarification"] = None
+        conversation["pending_task_transition"] = None
         conversation["confirmation_status"] = "not_required"
         conversation["no_goal_turn_count"] = 0
 
@@ -861,7 +925,21 @@ class AgentRuntime:
             }
         conversation["active_task"] = tasks[0]
         conversation["queued_tasks"] = tasks[1:]
-        return {"conversation": conversation, "next_action": "policy"}
+        response_parts = list(state.get("response_parts", []))
+        if len(tasks) > 1:
+            first_label = self._goal_label(tasks[0]["skill_name"], tasks[0]["goal"])
+            next_label = self._goal_label(tasks[1]["skill_name"], tasks[1]["goal"])
+            response_parts.append(
+                "I can help with both. I'll start by helping you {}. When that's "
+                "complete, I'll ask before continuing to {}.".format(
+                    first_label, next_label
+                )
+            )
+        return {
+            "conversation": conversation,
+            "response_parts": response_parts,
+            "next_action": "policy",
+        }
 
     def _supply_input(self, state: WorkflowState) -> Dict[str, Any]:
         conversation = state["conversation"]
@@ -1248,9 +1326,15 @@ class AgentRuntime:
             conversation["active_task"] = None
 
         if conversation["queued_tasks"]:
-            conversation["active_task"] = conversation["queued_tasks"].pop(0)
+            transition = self._new_task_transition(conversation["queued_tasks"][0])
+            conversation["pending_task_transition"] = transition
             conversation["confirmation_status"] = "not_required"
-            return {"conversation": conversation, "next_action": "policy"}
+            return {
+                "conversation": conversation,
+                "response_parts": state.get("response_parts", [])
+                + [transition["question"]],
+                "next_action": "finalize",
+            }
 
         response_parts = state.get("response_parts", [])
         if conversation["paused_tasks"] and not completed_was_handoff:
@@ -1880,6 +1964,16 @@ class AgentRuntime:
             if goal and goal.get("display_name"):
                 return str(goal["display_name"])
         return goal_name.replace("_", " ")
+
+    def _new_task_transition(self, task: TaskState) -> Dict[str, str]:
+        label = self._goal_label(task["skill_name"], task["goal"])
+        return {
+            "task_id": task["id"],
+            "goal_label": label,
+            "question": (
+                "That request is complete. Would you like me to continue and {}?"
+            ).format(label),
+        }
 
     def _confirmation_copy(self, task: TaskState, key: str, default: str) -> str:
         definition = self._task_definition(task)

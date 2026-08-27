@@ -52,6 +52,11 @@ class SkillExecutor(ABC):
         field_name = task.get("missing_field")
         if field_name:
             value = message.strip()
+            field_schema = (
+                context.definition.input_schema.get("properties", {}).get(
+                    field_name, {}
+                )
+            )
             rule = context.definition.input_extraction.get(field_name, {})
             strategy = rule.get("strategy")
             if strategy == "regex":
@@ -73,6 +78,12 @@ class SkillExecutor(ABC):
                 )
                 if matched is not None:
                     value = str(matched)
+            pattern = field_schema.get("pattern") if isinstance(field_schema, dict) else None
+            if pattern and not re.fullmatch(str(pattern), value):
+                # A semantic provider may decline to interpret malformed natural
+                # language. Do not turn that raw phrase into a misleading workflow
+                # validation error; leave the field missing so it is elicited again.
+                return
             task.setdefault("inputs", {})[field_name] = value
 
     @abstractmethod

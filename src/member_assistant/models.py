@@ -26,6 +26,12 @@ class PendingHandoffOffer(TypedDict):
     question: str
 
 
+class PendingTaskTransition(TypedDict):
+    task_id: str
+    goal_label: str
+    question: str
+
+
 class TaskState(TypedDict, total=False):
     id: str
     skill_name: str
@@ -51,6 +57,7 @@ class ConversationState(TypedDict):
     pending_clarification: Optional[PendingClarification]
     pending_goal_clarification: Optional[PendingGoalClarification]
     pending_handoff_offer: Optional[PendingHandoffOffer]
+    pending_task_transition: Optional[PendingTaskTransition]
     member_profile: Dict[str, Any]
     greeted: bool
     no_goal_turn_count: int
@@ -90,6 +97,7 @@ def new_conversation_state() -> ConversationState:
         "pending_clarification": None,
         "pending_goal_clarification": None,
         "pending_handoff_offer": None,
+        "pending_task_transition": None,
         "member_profile": {},
         "greeted": False,
         "no_goal_turn_count": 0,

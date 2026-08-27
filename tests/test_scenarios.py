@@ -80,6 +80,10 @@ class _NaturalTurnProvider(DeterministicProvider):
                 "correction" if "actually" in normalized else "provide_information"
             )
             relation = "continue"
+        if "one hundreds" in normalized:
+            slot_updates.append(SlotUpdate("amount", "100.00", 0.98))
+            conversation_act = "provide_information"
+            relation = "continue"
         if "checking ending in 1001" in normalized:
             slot_updates.extend(
                 [
@@ -181,16 +185,59 @@ def test_multi_goal_orders_read_only_before_consequential(runtime_factory):
         "multi", "Check my balance and transfer $25 from checking to savings"
     )
     assert "$2,450.75" in first.text
-    assert "Review mock transfer" in first.text
-    assert first.text.index("$2,450.75") < first.text.index("Review mock transfer")
+    assert "I'll start by helping you check an account balance" in first.text
+    assert "Would you like me to continue and make an internal transfer" in first.text
+    assert "Review mock transfer" not in first.text
     assert runtime.tools.transfers.submission_count == 0
+    state = runtime.inspect_state("multi")
+    assert state["active_task"] is None
+    assert state["queued_tasks"][0]["skill_name"] == "internal_transfer"
+    assert state["pending_task_transition"] is not None
+
+    second = runtime.chat("multi", "yes")
+    assert "Review mock transfer" in second.text
     state = runtime.inspect_state("multi")
     assert state["active_task"]["skill_name"] == "internal_transfer"
     assert state["active_task"]["status"] == "awaiting_confirmation"
 
-    second = runtime.chat("multi", "yes")
-    assert "Mock transfer completed" in second.text
+    third = runtime.chat("multi", "yes")
+    assert "Mock transfer completed" in third.text
     assert runtime.tools.transfers.submission_count == 1
+
+
+def test_member_can_decline_the_next_planned_goal(runtime_factory):
+    runtime = runtime_factory()
+    first = runtime.chat(
+        "multi-decline", "Check my checking balance and transfer $25 to savings"
+    )
+    assert "$2,450.75" in first.text
+    assert "Would you like me to continue" in first.text
+
+    declined = runtime.chat("multi-decline", "no")
+
+    assert "won't continue" in declined.text
+    state = runtime.inspect_state("multi-decline")
+    assert state["active_task"] is None
+    assert state["queued_tasks"] == []
+    assert state["pending_task_transition"] is None
+    assert runtime.tools.transfers.submission_count == 0
+
+
+def test_planned_goal_transition_survives_restart(runtime_factory):
+    first_runtime = runtime_factory(db_name="planned-transition.db")
+    first_runtime.chat(
+        "multi-durable",
+        "Check my checking balance and transfer $25 from checking to savings",
+    )
+    first_runtime.close()
+
+    second_runtime = runtime_factory(db_name="planned-transition.db")
+    continued = second_runtime.chat("multi-durable", "yes")
+
+    assert "Review mock transfer" in continued.text
+    assert second_runtime.inspect_state("multi-durable")["active_task"][
+        "skill_name"
+    ] == "internal_transfer"
 
 
 def test_live_agent_handoff(runtime_factory):
@@ -432,6 +479,34 @@ def test_semantic_turn_understanding_collects_multiple_slots_and_word_amount(
     assert "Savings ending in 2002" in review.text
     assert "Checking ending in 1001" in review.text
     assert "live agent" not in review.text
+
+
+def test_semantic_turn_understanding_normalizes_disfluent_word_amount(
+    runtime_factory,
+):
+    runtime = runtime_factory(provider=_NaturalTurnProvider())
+    runtime.chat("semantic-disfluency", "I want to make a transfer")
+    runtime.chat("semantic-disfluency", "from saving to checking")
+
+    review = runtime.chat("semantic-disfluency", "one hundreds dollar")
+
+    assert "$100.00" in review.text
+    assert "Review mock transfer" in review.text
+
+
+def test_uninterpreted_word_amount_is_reelicited_not_reported_as_over_limit(
+    runtime_factory,
+):
+    runtime = runtime_factory()
+    runtime.chat("amount-retry", "I want to make a transfer")
+    runtime.chat("amount-retry", "checking")
+    runtime.chat("amount-retry", "saving")
+
+    retry = runtime.chat("amount-retry", "one hundreds dollar")
+
+    assert "How much would you like to transfer" in retry.text
+    assert "configured transfer limit" not in retry.text
+    assert "amount" not in runtime.inspect_state("amount-retry")["active_task"]["inputs"]
 
 
 def test_semantic_correction_revalidates_and_replaces_confirmation(runtime_factory):

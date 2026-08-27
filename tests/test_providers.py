@@ -144,6 +144,7 @@ def test_openai_understands_multiple_active_task_slots(runtime_factory):
     request = responses.requests[0]
     assert "every explicitly supplied or corrected" in request["instructions"]
     assert "two hundred" in request["instructions"]
+    assert "one hundreds dollar" in request["instructions"]
 
 
 def test_non_reasoning_openai_model_omits_reasoning_parameter():
