@@ -18,6 +18,11 @@ class DeclarativeSkillExecutor(SkillExecutor):
         variables = task.setdefault("variables", {})
         task.setdefault("workflow_step", 0)
         completed_steps = task.setdefault("completed_steps", [])
+        changed_fields = set(task.pop("updated_input_fields", []))
+        current_step = steps[task["workflow_step"]] if task["workflow_step"] < len(steps) else {}
+        restart_fields = set(current_step.get("restart_on_input_change", []))
+        if changed_fields.intersection(restart_fields):
+            task["workflow_step"] = int(current_step["restart_step"])
 
         while task["workflow_step"] < len(steps):
             step_index = task["workflow_step"]
@@ -172,7 +177,13 @@ class DeclarativeSkillExecutor(SkillExecutor):
 
         variables[step["save_as"]] = selected
         self._complete_step(step, completed_steps)
-        task["workflow_step"] += 1
+        if (
+            not selected_value
+            and len(collection) <= int(step.get("jump_if_collection_at_most", -1))
+        ) or len(selected) <= int(step.get("jump_if_selected_at_most", -1)):
+            task["workflow_step"] = int(step["jump_step"])
+        else:
+            task["workflow_step"] += 1
         return None
 
     def _validate(
@@ -359,8 +370,18 @@ class DeclarativeSkillExecutor(SkillExecutor):
         collection: Iterable[Mapping[str, Any]],
         invalid: bool,
     ) -> str:
+        choices_collection = list(collection)
+        distinct_by = step.get("choice_distinct_by")
+        if distinct_by:
+            seen = set()
+            choices_collection = [
+                item
+                for item in choices_collection
+                if item.get(distinct_by) not in seen
+                and not seen.add(item.get(distinct_by))
+            ]
         choices = step.get("separator", "; ").join(
-            step["choice_template"].format(**item) for item in collection
+            step["choice_template"].format(**item) for item in choices_collection
         )
         prefix = step.get("invalid_prefix", "") if invalid else ""
         return prefix + step["prompt_template"].format(choices=choices)

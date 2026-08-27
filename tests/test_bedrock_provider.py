@@ -57,7 +57,7 @@ def test_bedrock_nova_and_terra_share_converse_turn_contract(
                             "skill_name": "guided_balance",
                             "goal": "check_account_balance",
                             "confidence": 0.94,
-                            "inputs": {"account": "checking"},
+                            "inputs": {"account_type": "checking"},
                         }
                     ],
                     "slot_updates": [],
@@ -82,7 +82,7 @@ def test_bedrock_nova_and_terra_share_converse_turn_contract(
 
     assert analysis.goals[0].skill_name == "guided_balance"
     assert analysis.goals[0].goal == "check_account_balance"
-    assert analysis.goals[0].inputs == {"account": "checking"}
+    assert analysis.goals[0].inputs == {"account_type": "checking"}
     request = client.requests[0]
     assert request["modelId"] == model_id
     assert request["inferenceConfig"] == {"maxTokens": 900}

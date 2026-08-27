@@ -1,5 +1,5 @@
 apiVersion: nexus.catalog/v1
-revision: 17
+revision: 18
 skills:
   approved_knowledge:
     version: 2.0.0
@@ -40,16 +40,16 @@ skills:
         query:
           strategy: full_message
   guided_balance:
-    version: 2.0.0
-    artifact_hash: 414991b5e1ab9fb8285b3d4f0987bfd7caac143116b27990742e1c7c38617c39
-    artifact: guided_balance/2.0.0/SKILL.md
+    version: 2.1.0
+    artifact_hash: 7a76e1f28fb6bb6f6f961cccd49ac2ae2a65512031ca6d6d3132e624b56f8e12
+    artifact: guided_balance/2.1.0/SKILL.md
     routing:
       name: guided_balance
-      version: 2.0.0
-      artifact_hash: 414991b5e1ab9fb8285b3d4f0987bfd7caac143116b27990742e1c7c38617c39
+      version: 2.1.0
+      artifact_hash: 7a76e1f28fb6bb6f6f961cccd49ac2ae2a65512031ca6d6d3132e624b56f8e12
       archetype: guided_resolution
-      description: Retrieves authorized mock account balances with guided account
-        selection.
+      description: Retrieves authorized mock account balances using account type and
+        account-number selection when needed.
       owner: Deposit Servicing
       risk_tier: read_only
       interaction: guided
@@ -68,18 +68,44 @@ skills:
       input_schema:
         type: object
         properties:
-          account:
+          account_type:
+            type: string
+            enum:
+            - checking
+            - savings
+          account_number:
             type: string
       input_extraction:
-        account:
+        account_type:
           strategy: alias
           aliases:
             checking: checking
+            checkings: checking
             savings: savings
-            chk-001: chk-001
-            sav-001: sav-001
+            saving: savings
+            chk-001: checking
+            chk-002: checking
+            chk-003: checking
+            sav-001: savings
+            sav-002: savings
+            '1001': checking
+            '1002': checking
+            '1003': checking
+            '2002': savings
+            '2003': savings
+        account_number:
+          strategy: alias
+          aliases:
+            chk-001: '1001'
+            chk-002: '1002'
+            chk-003: '1003'
+            sav-001: '2002'
+            sav-002: '2003'
             '1001': '1001'
+            '1002': '1002'
+            '1003': '1003'
             '2002': '2002'
+            '2003': '2003'
   internal_transfer:
     version: 2.0.0
     artifact_hash: 79dce9215262a4a9b69f17181c435793e71cdeca907a65f2665958c846edae51

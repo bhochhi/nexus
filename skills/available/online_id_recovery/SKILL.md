@@ -3,7 +3,7 @@ apiVersion: nexus.skills/v1
 kind: Skill
 metadata:
   name: online_id_recovery
-  version: 3.0.1
+  version: 3.0.0
   owner: Digital Identity
 intent:
   description: Navigates a member to the approved online-ID recovery experience.

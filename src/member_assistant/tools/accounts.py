@@ -26,7 +26,10 @@ class MockAccountTool:
     def __init__(self):
         self._accounts = [
             AccountBalance("chk-001", "checking", "••••1001", Decimal("2450.75")),
+            AccountBalance("chk-002", "checking", "••••1002", Decimal("1240.50")),
+            AccountBalance("chk-003", "checking", "••••1003", Decimal("3675.00")),
             AccountBalance("sav-001", "savings", "••••2002", Decimal("8250.25")),
+            AccountBalance("sav-002", "savings", "••••2003", Decimal("18250.25")),
         ]
 
     def list_eligible_balances(self, member_ref: str) -> List[AccountBalance]:

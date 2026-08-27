@@ -710,6 +710,7 @@ class AgentRuntime:
         goal_context = {
             "active_skill": active.get("skill_name") if active else None,
             "active_goal": active.get("goal") if active else None,
+            "last_selected_skill": conversation.get("last_completed_skill"),
             "task_status": active.get("status") if active else None,
             "missing_field": active.get("missing_field") if active else None,
             "pending_question": active.get("pending_question") if active else None,
@@ -1417,6 +1418,8 @@ class AgentRuntime:
         changed_fields = [
             field_name for field_name in declared_order if field_name in changed
         ]
+        if changed_fields:
+            task["updated_input_fields"] = changed_fields
         return {
             "conversation": conversation,
             "slot_attempted": True,
@@ -1750,6 +1753,8 @@ class AgentRuntime:
         if task:
             definition = self._task_definition(task)
             completed_was_handoff = bool(definition and definition.risk_tier == "handoff")
+            if definition and definition.risk_tier == "read_only":
+                conversation["last_completed_skill"] = definition.name
             conversation["active_task"] = None
 
         if conversation["queued_tasks"]:
@@ -2245,10 +2250,21 @@ class AgentRuntime:
                 "Hi {}. I'm glad you reached out. Tell me what you need help with, and I'll "
                 "do my best to point you in the right direction."
             ).format(name)
-        return (
-            "Hi {}. I'm glad you reached out. I can currently help you {}. "
-            "What can I help you with today?"
-        ).format(name, self._join_choices(capabilities))
+        templates = (
+            "Hi {name}. I'm glad you reached out. I can currently help you "
+            "{capabilities}. What can I help you with today?",
+            "Hi {name}. I can help you {capabilities}. What would you like to "
+            "take care of today?",
+            "Hi {name}. You can ask me to {capabilities}. Where would you like "
+            "to begin?",
+        )
+        variant = conversation.get("reception_variant")
+        if not isinstance(variant, int) or not 0 <= variant < len(templates):
+            variant = uuid.uuid4().int % len(templates)
+            conversation["reception_variant"] = variant
+        return templates[variant].format(
+            name=name, capabilities=self._join_choices(capabilities)
+        )
 
     def _unmatched_reception_response(
         self,

@@ -241,7 +241,7 @@ def conversation() -> None:
             with st.chat_message(message["role"]):
                 if message.get("identity"):
                     st.caption(message["identity"])
-                st.markdown(message["content"])
+                st.markdown(message["content"].replace("$", r"\$"))
 
     message_count = len(st.session_state.messages)
     if message_count != st.session_state.last_scrolled_message_count:

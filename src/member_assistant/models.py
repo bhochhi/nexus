@@ -63,6 +63,7 @@ class ConversationState(TypedDict):
     greeted: bool
     no_goal_turn_count: int
     selected_skill: Optional[str]
+    last_completed_skill: Optional[str]
     confirmation_status: str
     outcome: Optional[Dict[str, Any]]
     awaiting_resume: bool
@@ -106,6 +107,7 @@ def new_conversation_state() -> ConversationState:
         "greeted": False,
         "no_goal_turn_count": 0,
         "selected_skill": None,
+        "last_completed_skill": None,
         "confirmation_status": "not_required",
         "outcome": None,
         "awaiting_resume": False,

@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from member_assistant.config import PROJECT_ROOT
 from member_assistant.providers import (
     DeterministicProvider,
@@ -6,6 +8,7 @@ from member_assistant.providers import (
     SlotUpdate,
     TurnAnalysis,
 )
+from member_assistant.tools.accounts import AccountBalance
 
 
 class _NoisyBalanceProvider(DeterministicProvider):
@@ -120,7 +123,7 @@ def test_speculative_model_slot_uses_neutral_elicitation_then_validates_reply(
 
     prompt = runtime.chat("neutral-slot", "What about balance?")
 
-    assert "Which account would you like" in prompt.text
+    assert "Which account type would you like" in prompt.text
     assert "couldn't match" not in prompt.text
 
     invalid = runtime.chat("neutral-slot", "my mystery account")
@@ -134,9 +137,9 @@ def test_balance_clarification_and_durable_resume_after_restart(runtime_factory)
     first_runtime = runtime_factory(db_name="durable.db")
 
     prompt = first_runtime.chat("balance", "What is my account balance?")
-    assert "Which account" in prompt.text
+    assert "Which account type" in prompt.text
     saved = first_runtime.inspect_state("balance")
-    assert saved["pending_clarification"]["field"] == "account"
+    assert saved["pending_clarification"]["field"] == "account_type"
     first_runtime.close()
 
     second_runtime = runtime_factory(db_name="durable.db")
@@ -144,6 +147,50 @@ def test_balance_clarification_and_durable_resume_after_restart(runtime_factory)
 
     assert "$8,250.25" in answer.text
     assert second_runtime.inspect_state("balance")["active_task"] is None
+
+
+def test_balance_collects_account_type_then_allows_correction(runtime_factory):
+    runtime = runtime_factory()
+
+    prompt = runtime.chat("balance-correction", "What is my balance?")
+    assert "Which account type" in prompt.text
+
+    savings = runtime.chat("balance-correction", "savings")
+    assert "Savings ending in 2002" in savings.text
+    assert "Savings ending in 2003" in savings.text
+    assert "Which account would you like" not in savings.text
+
+    checking_prompt = runtime.chat("balance-correction", "Actually, checking")
+    assert "Which account would you like" in checking_prompt.text
+
+    checking = runtime.chat("balance-correction", "1001")
+    assert "Checking ending in 1001: $2,450.75" in checking.text
+    assert "Checking ending in 1002" not in checking.text
+    assert "Checking ending in 1003" not in checking.text
+
+
+def test_balance_account_number_follow_up_continues_last_read_only_skill(runtime_factory):
+    runtime = runtime_factory()
+
+    runtime.chat("balance-follow-up", "What is my balance?")
+    runtime.chat("balance-follow-up", "checking")
+    runtime.chat("balance-follow-up", "1001")
+    savings = runtime.chat("balance-follow-up", "What about 2002?")
+
+    assert "Savings ending in 2002: $8,250.25" in savings.text
+
+
+def test_balance_displays_all_accounts_when_member_has_two_or_fewer(runtime_factory):
+    runtime = runtime_factory()
+    runtime.tools.accounts._accounts = [
+        AccountBalance("chk-001", "checking", "••••1001", Decimal("2450.75")),
+        AccountBalance("sav-001", "savings", "••••2002", Decimal("8250.25")),
+    ]
+
+    reply = runtime.chat("two-balance-accounts", "What is my balance?")
+
+    assert "Checking ending in 1001: $2,450.75" in reply.text
+    assert "Savings ending in 2002: $8,250.25" in reply.text
 
 
 def test_transfer_requires_immediate_confirmation(runtime_factory):
@@ -306,6 +353,7 @@ def test_greeting_loads_mock_member_profile_and_explains_capabilities(runtime_fa
     assert "live agent" not in reply.text
     state = runtime.inspect_state("reception")
     assert state["member_profile"]["preferred_name"] == "Jordan"
+    assert state["reception_variant"] in {0, 1, 2}
     assert state["greeted"] is True
 
 

@@ -59,6 +59,26 @@ class DeterministicProvider(ModelProvider):
                     )
                 )
 
+        if not matches and not (context or {}).get("active_skill"):
+            prior_skill = next(
+                (
+                    skill
+                    for skill in catalog
+                    if skill.name == str((context or {}).get("last_selected_skill") or "")
+                ),
+                None,
+            )
+            inputs = self.extract_inputs(prior_skill, message) if prior_skill else {}
+            if prior_skill and inputs:
+                matches.append(
+                    GoalMatch(
+                        skill_name=prior_skill.name,
+                        goal=str(prior_skill.supported_goals[0]["name"]),
+                        confidence=0.84,
+                        inputs=inputs,
+                    )
+                )
+
         # A request for human support takes priority over all automated work.
         handoffs = [
             match
@@ -85,11 +105,20 @@ class DeterministicProvider(ModelProvider):
         # multi-slot interpretation belongs to a semantic provider; otherwise a
         # four-digit account suffix can be mistaken for a transfer amount.
         missing_field = str((context or {}).get("missing_field") or "")
-        slot_updates = (
-            [SlotUpdate(missing_field, extracted[missing_field], 1.0)]
-            if missing_field and missing_field in extracted
-            else []
-        )
+        slot_updates = []
+        if active and active.archetype == "guided_resolution":
+            slot_updates.extend(
+                SlotUpdate(field_name, value, 1.0)
+                for field_name, value in extracted.items()
+            )
+        elif missing_field and missing_field in extracted:
+            slot_updates.append(SlotUpdate(missing_field, extracted[missing_field], 1.0))
+        current_inputs = dict((context or {}).get("current_inputs") or {})
+        for field_name, value in extracted.items():
+            if current_inputs.get(field_name) not in {None, ""} and current_inputs.get(
+                field_name
+            ) != value:
+                slot_updates.append(SlotUpdate(field_name, value, 1.0))
         return TurnAnalysis(
             goals=goals,
             skill_gap=self._detect_skill_gap(normalized, goals),
