@@ -1013,6 +1013,15 @@ class AgentRuntime:
             not active_is_handoff
             and (handoff_requested or self._is_frustrated(message) or sentiment_escalation)
         ):
+            handoff_inputs = next(
+                (
+                    goal.get("inputs", {})
+                    for goal in deterministic_goals
+                    if self._is_handoff_goal(goal, catalog)
+                    and goal.get("inputs", {}).get("queue")
+                ),
+                {},
+            )
             return self._offer_handoff(
                 updates,
                 conversation,
@@ -1021,6 +1030,7 @@ class AgentRuntime:
                     if handoff_requested
                     else "member sentiment indicates additional support is appropriate"
                 ),
+                inputs=handoff_inputs,
             )
 
         pending_transition = conversation.get("pending_task_transition")
@@ -2130,8 +2140,9 @@ class AgentRuntime:
         updates: Dict[str, Any],
         conversation: ConversationState,
         reason: str,
+        inputs: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        offer = self._new_handoff_offer(conversation, reason)
+        offer = self._new_handoff_offer(conversation, reason, inputs)
         conversation["pending_handoff_offer"] = offer
         updates.update(
             goals=[],
@@ -2142,21 +2153,30 @@ class AgentRuntime:
 
     @staticmethod
     def _new_handoff_offer(
-        conversation: ConversationState, reason: str
+        conversation: ConversationState,
+        reason: str,
+        inputs: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         active = conversation.get("active_task")
         if not active and conversation.get("paused_tasks"):
             active = conversation["paused_tasks"][0]
+        question = (
+            "I understand you'd like to talk with a live agent. Would you like me to "
+            "connect you now? Please answer yes or no."
+            if reason == "member explicitly requested a live agent"
+            else (
+                "It looks like you may benefit from additional help. Would you like me to "
+                "connect you with a live agent? Please answer yes or no."
+            )
+        )
         return {
             "reason": reason,
             "active_goal": active.get("goal", "general assistance")
             if active
             else "general assistance",
             "completed_steps": list(active.get("completed_steps", [])) if active else [],
-            "question": (
-                "It looks like you may benefit from additional help. Would you like me to "
-                "connect you with a live agent? Please answer yes or no."
-            ),
+            "inputs": dict(inputs or {}),
+            "question": question,
         }
 
     @staticmethod
@@ -2171,6 +2191,7 @@ class AgentRuntime:
             "goal": definition.supported_goals[0]["name"],
             "confidence": 1.0,
             "inputs": {
+                **dict(offer.get("inputs", {})),
                 "active_goal": offer["active_goal"],
                 "completed_steps": list(offer.get("completed_steps", [])),
             },

@@ -245,6 +245,7 @@ def test_live_agent_handoff(runtime_factory):
 
     offer = runtime.chat("handoff", "This is not helping—get me a person")
 
+    assert "I understand you'd like to talk with a live agent" in offer.text
     assert "Would you like me to connect" in offer.text
     assert runtime.inspect_state("handoff")["pending_handoff_offer"] is not None
     assert runtime.inspect_state("handoff")["handoff_status"] is None
@@ -265,6 +266,20 @@ def test_live_agent_handoff(runtime_factory):
     assert queued.outcome["queue"] == "banking"
     assert "Goal:" in queued.outcome["summary"]
     assert runtime.inspect_state("handoff")["handoff_status"] == "queued"
+
+
+def test_live_agent_handoff_reuses_context_provided_before_confirmation(runtime_factory):
+    runtime = runtime_factory()
+
+    offer = runtime.chat("handoff-context", "Let's talk to a live agent for my auto policy")
+
+    assert "Would you like me to connect" in offer.text
+
+    queued = runtime.chat("handoff-context", "yes")
+
+    assert "insurance live-support queue" in queued.text
+    assert queued.outcome["status"] == "queued"
+    assert queued.outcome["queue"] == "insurance"
 
 
 def test_repeated_negative_sentiment_offers_live_support(runtime_factory):

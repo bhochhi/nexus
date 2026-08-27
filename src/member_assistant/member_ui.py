@@ -22,17 +22,17 @@ st.markdown(
 html, body, [class*="css"] { font-family:'DM Sans',sans-serif; }
 h1,h2,h3 { font-family:'Manrope',sans-serif; letter-spacing:-.04em; }
 .block-container { max-width:820px; padding-top:2rem; }
-.hero { padding:1.6rem 1.7rem; border-radius:28px; color:white; background:linear-gradient(135deg,#112b52,#2356d8 68%,#25bca8); box-shadow:0 24px 55px rgba(31,73,156,.23); margin-bottom:1rem; }
-.eyebrow { font-size:.72rem; letter-spacing:.16em; text-transform:uppercase; opacity:.75; font-weight:700; }
-.hero h1 { color:white; margin:.25rem 0 .35rem; font-size:2.1rem; }
-.hero p { opacity:.86; margin:0; }
+.hero { padding:1rem 1.25rem; border-radius:14px; color:white; background:linear-gradient(135deg,#112b52,#2356d8 68%,#25bca8); box-shadow:0 16px 35px rgba(31,73,156,.18); margin-bottom:1rem; }
+.hero h1 { color:white; margin:0 0 .2rem; font-size:1.35rem; }
+.hero p { opacity:.9; margin:0; font-size:.9rem; }
 .statusbar { display:flex; align-items:center; justify-content:space-between; padding:.72rem 1rem; background:rgba(255,255,255,.82); border:1px solid rgba(29,63,114,.09); border-radius:18px; backdrop-filter:blur(12px); margin:.7rem 0 1rem; }
 .statusdot { width:9px; height:9px; border-radius:50%; background:#35d2ba; box-shadow:0 0 0 5px rgba(53,210,186,.14); display:inline-block; margin-right:.55rem; }
 .soft { color:var(--muted); font-size:.86rem; }
 [data-testid="stChatMessage"] { border:1px solid rgba(26,54,92,.07); border-radius:20px; padding:.2rem .65rem; background:rgba(255,255,255,.78); box-shadow:0 8px 25px rgba(35,61,100,.055); }
 [data-testid="stChatMessage"] p, [data-testid="stChatMessage"] [data-testid="stCaptionContainer"] { color:#10213a !important; }
-[data-testid="stChatInput"] { border-radius:20px; background:#fff; box-shadow:0 12px 30px rgba(35,61,100,.1); }
-[data-testid="stChatInput"] textarea { color:#10213a !important; caret-color:#2356d8 !important; }
+[data-testid="stTextInput"] [data-baseweb="input"], [data-testid="stTextInput"] [data-baseweb="input"] > div, [data-testid="stChatInput"], [data-testid="stChatInput"] > div, [data-testid="stChatInput"] [data-baseweb="textarea"], [data-testid="stChatInput"] [data-baseweb="textarea"] > div { border-radius:20px; background-color:#fff !important; box-shadow:0 12px 30px rgba(35,61,100,.1); }
+[data-testid="stTextInput"] input, [data-testid="stChatInput"] textarea { background-color:#fff !important; color:#10213a !important; -webkit-text-fill-color:#10213a !important; caret-color:#2356d8 !important; }
+[data-testid="stTextInput"] input::placeholder, [data-testid="stChatInput"] textarea::placeholder { color:#6b7a90 !important; -webkit-text-fill-color:#6b7a90 !important; opacity:1; }
 [data-testid="stButton"] button { background:#fff; border:1px solid rgba(26,54,92,.12); }
 [data-testid="stButton"] button p { color:#10213a !important; }
 [data-testid="stFormSubmitButton"] button { background:linear-gradient(90deg,#2356d8,#24bca8); border:0; }
@@ -64,18 +64,18 @@ st.session_state.setdefault("mode", "virtual")
 st.session_state.setdefault("case", None)
 st.session_state.setdefault("connection", "connecting")
 st.session_state.setdefault("notice", "")
+st.session_state.setdefault("member_ready", False)
 
 st.markdown(
-    """<div class="hero"><div class="eyebrow">Nexus member experience</div>
-    <h1>Money conversations, reimagined.</h1>
-    <p>One continuous conversation—from intelligent self-service to a human specialist.</p></div>""",
+    """<div class="hero"><h1>Conversation-First Member Experience</h1>
+    <p>Conversationally adaptive, operationally governed</p></div>""",
     unsafe_allow_html=True,
 )
 
 if st.session_state.client is None:
     with st.form("member_login"):
         st.subheader("Start your secure conversation")
-        name = st.text_input("Name", placeholder="Jordan Lee")
+        name = st.text_input("Name", placeholder="Your name")
         member_id = st.text_input(
             "Member ID",
             placeholder="member-1001",
@@ -123,6 +123,9 @@ def _process(event: Dict[str, Any]) -> None:
         st.session_state.event_ids.add(event_id)
     if event_type == "connection.open":
         st.session_state.connection = "connected"
+    elif event_type == "member.ready":
+        st.session_state.name = str(event.get("member_name", st.session_state.name))
+        st.session_state.member_ready = True
     elif event_type == "connection.error":
         st.session_state.connection = "reconnecting"
         st.session_state.notice = event.get("error", "Connection interrupted")
@@ -239,8 +242,14 @@ def conversation() -> None:
     if st.session_state.notice and mode != "waiting":
         st.caption(st.session_state.notice)
 
-    disabled = mode == "waiting"
-    prompt = "Message your MSR…  (/end to finish)" if mode == "connected" else "How can we help?"
+    disabled = mode == "waiting" or not st.session_state.member_ready
+    prompt = (
+        "Message your MSR…  (/end to finish)"
+        if mode == "connected"
+        else "Connecting your member profile…"
+        if not st.session_state.member_ready
+        else "How can we help?"
+    )
     message = st.chat_input(prompt, disabled=disabled)
     if message:
         message_id = "msg_{}".format(uuid.uuid4().hex)

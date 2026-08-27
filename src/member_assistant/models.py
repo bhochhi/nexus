@@ -23,6 +23,7 @@ class PendingHandoffOffer(TypedDict):
     reason: str
     active_goal: str
     completed_steps: List[str]
+    inputs: Dict[str, Any]
     question: str
 
 
