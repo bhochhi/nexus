@@ -37,8 +37,8 @@ flowchart LR
 
     F[Agentic] --> G[Objective]
     G --> H[Context]
-    H --> I[Job]
-    I --> J[Governed Execution]
+    H --> I[One or more Goals]
+    I --> J[Governed Skill Execution]
 ```
 
 **Talk track:**
@@ -77,7 +77,7 @@ flowchart LR
 A consistent member experience across chat, voice, IVR, and human-agent channels.
 
 **Speaker notes:**
-Keep this slide simple. This is the leadership view. Avoid LangGraph, job lifecycle, and model-specific details here. The point is: one adaptive conversation layer, many reusable business capabilities, trusted enterprise systems behind it.
+Keep this slide simple. This is the leadership view. Avoid LangGraph, goal lifecycle, and model-specific details here. The point is: one adaptive conversation layer, many reusable business capabilities, trusted enterprise systems behind it.
 
 ---
 
@@ -89,20 +89,21 @@ Keep this slide simple. This is the leadership view. Avoid LangGraph, job lifecy
 flowchart LR
     subgraph Business[Capability owner]
         SK[Versioned skill contract]
-        SK --> RT[Risk tier]
-        SK --> EM[Execution mode]
-        SK --> AC[Access + confirmation]
+        SK --> TY[Skill type]
+        SK --> EP[Execution plan]
+        SK --> VA[Validation]
+        SK --> CP[Controls + policies]
         SK --> TL[Approved tools + failure behavior]
     end
 
     subgraph Platform[Platform-owned controls]
-        VA[Validate publish-time contract]
-        PE[Enforce policy at runtime]
+        PC[Validate publish-time contract]
+        PE[Execute plan + enforce governance]
         AU[Audit version + decision + outcome]
     end
 
-    SK --> VA
-    VA --> PE
+    SK --> PC
+    PC --> PE
     PE --> C[Conversational\nFAQ / Education]
     PE --> G[Guided\nBalance / Intake]
     PE --> X[Deterministic\nTransfer / Card Actions]
@@ -116,21 +117,21 @@ Business teams can publish capabilities with their own declared governance. The 
 
 **Speaker notes:**
 This is the selling point: governance is federated, enforcement is centralized.
-Capability owners declare the business contract: risk tier, execution mode,
-approved tools, access requirements, confirmation, safe failure behavior, and
-acceptance criteria. Platform owners define the allowed vocabulary and workflow
-primitives, validate the artifact at publication, enforce policy at execution,
-and retain evidence. A risk tier is not merely a label: it makes a transfer,
+Skill owners declare the business contract: type, execution plan, validation,
+controls and policies, approved tools, safe failure behavior, and acceptance
+criteria. Platform owners define the allowed vocabulary and workflow primitives,
+validate the artifact at publication, execute the plan under those controls,
+and retain evidence. A skill type is not merely a label: it makes a transfer,
 balance read, FAQ, navigation action, and handoff visibly different classes of
-work. In the POC, risk tier drives multi-goal ordering and constrains valid
-confirmation designs; companion governance fields declare the exact access and
-tool controls. Do not claim every enterprise policy is implemented already.
+work. In the POC, the skill's governance fields drive multi-goal ordering and
+constrain valid confirmation designs. Do not claim every enterprise policy is
+implemented already.
 
 ---
 
 # Slide 5: Platform Component View
 
-## The platform owns state, jobs, policies, and execution
+## The platform owns state, goals, governance, and execution
 
 ```mermaid
 flowchart LR
@@ -138,12 +139,11 @@ flowchart LR
     SM --> ORCH[Conversation Orchestrator\nLangGraph]
 
     ORCH --> CA[Conversation Analyzer]
-    ORCH --> JM[Job Manager]
-    ORCH --> PE[Planning Engine]
+    ORCH --> GM[Goal Manager]
     ORCH --> DE[Decision Engine]
 
-    DE --> SR[Capability / Skill Registry]
-    SR --> RT[Skill Runtime]
+    DE --> SR[Skill Registry]
+    SR --> RT[Governed Skill Runtime]
     RT --> TE[Tool Executor]
     TE --> ENT[Enterprise APIs]
 
@@ -157,24 +157,29 @@ flowchart LR
 ```
 
 **Speaker notes:**
-The model is not a monolith. We split responsibilities: analyze conversation, manage jobs, create/update plans, decide next action, execute skills, compose responses, and enforce guardrails. LangGraph coordinates the loop.
+The model is not a monolith. We split responsibilities: analyze conversation,
+manage goals, resolve the skill definition, decide the next safe action, execute
+the skill-defined plan under governance, compose responses, and enforce
+guardrails. LangGraph coordinates the loop.
 
 ---
 
 # Slide 6: Mental Model
 
-## One objective creates one or more jobs when it has independent outcomes.
+## One objective becomes one or more goals, each derived from a skill definition
 
 ```mermaid
 flowchart TD
-    MO["Member Objective<br/>Move 500 dollars to savings<br/>and tell me my checking balance"] --> J1["Job 1<br/>Transfer money"]
-    MO --> J2["Job 2<br/>Report checking balance"]
+    MO["Member Objective<br/>Move 500 dollars to savings<br/>and tell me my checking balance"] --> G1["Goal 1<br/>Transfer money"]
+    MO --> G2["Goal 2<br/>Report checking balance"]
 
-    J1 --> P1["Execution Plan<br/>collect facts -> validate funds -> confirm -> execute"]
-    J2 --> P2["Execution Plan<br/>resolve account -> get balance -> respond"]
+    G1 --> S1["Transfer Skill Definition<br/>type + plan + validation + controls"]
+    G2 --> S2["Balance Skill Definition<br/>type + plan + validation + controls"]
+    S1 --> P1["Execution Plan<br/>collect facts -> validate funds -> confirm -> execute"]
+    S2 --> P2["Execution Plan<br/>resolve account -> get balance -> respond"]
 
-    JM["Job Manager<br/>job status, facts, priority"] --> DE[Decision Engine]
-    DE --> Q1{"Select the next<br/>runnable job"}
+    GM["Goal Manager<br/>goal status, facts, priority"] --> DE[Decision Engine]
+    DE --> Q1{"Select the next<br/>runnable goal"}
     Q1 -->|transfer selected| P1
     Q1 -->|balance selected| P2
     P1 --> Q2{"Determine the next<br/>safe transfer step"}
@@ -182,13 +187,13 @@ flowchart TD
 ```
 
 **Memorable line:**
-Members own objectives. The platform owns jobs. Jobs own execution plans. Every turn advances the right job.
+Members express objectives. The platform creates goals from skill definitions and executes each skill's plan under governance.
 
 **Decomposition rule:**
-Create a separate job only for an independently requested or independently resumable outcome. A balance lookup needed to validate a transfer remains a step in the transfer job's plan.
+Create a separate goal only for an independently requested or independently resumable outcome. A balance lookup needed to validate a transfer remains a step in the transfer skill's execution plan.
 
 **Speaker notes:**
-This slide prevents terminology confusion. Objective is human language. Job is platform state. Plan is how that job gets done. Here the member explicitly requested two outcomes, so the platform creates two jobs. The transfer plan may check available funds, but that is validation for the transfer, not a separate balance job. The Job Manager supplies each job's status, facts, and policy-derived priority. The Decision Engine selects one runnable job, then chooses the next safe step from that job's plan. Priority belongs to jobs, not plans.
+This slide prevents terminology confusion. An objective is the member's desired outcome. A goal is a platform-managed instance derived from a selected skill definition. The skill definition owns the execution plan, validation, and governance declarations; the platform executes and enforces them. Here the member explicitly requested two outcomes, so the platform creates two goals. The transfer skill may check available funds, but that is validation within the transfer plan, not a separate balance goal. The Goal Manager supplies each goal's status, facts, and policy-derived priority. The Decision Engine selects one runnable goal, then advances the next safe step in that goal's skill plan. Priority belongs to goals, not plans.
 
 ---
 
@@ -203,21 +208,21 @@ sequenceDiagram
     participant SM as Session Manager
     participant O as Orchestrator / LangGraph
     participant CA as Conversation Analyzer
-    participant JM as Job Manager
+    participant GM as Goal Manager
     participant DE as Decision Engine
     participant RT as Skill Runtime
     participant RC as Response Composer
     participant GR as Guardrails
 
     M->>SM: latest message
-    SM->>O: session + jobs + context
+    SM->>O: session + goals + context
     O->>CA: analyze turn
     CA-->>O: structured understanding
-    O->>JM: apply validated job updates
-    JM-->>O: prioritized jobs
-    O->>DE: which job? next safe step?
+    O->>GM: apply validated goal updates
+    GM-->>O: prioritized goals
+    O->>DE: which goal? next safe step?
     DE-->>O: structured decision
-    O->>RT: execute/advance capability
+    O->>RT: execute/advance skill plan under governance
     RT-->>O: structured business result
     O->>RC: compose response
     RC->>GR: validate policy/safety
@@ -241,7 +246,7 @@ sequenceDiagram
     participant SM as Session Manager
     participant O as LangGraph Orchestrator
     participant CA as Analyzer
-    participant JM as Job Manager
+    participant GM as Goal Manager
     participant DE as Decision Engine
     participant RT as Account Balance Skill
     participant API as Core Banking API
@@ -252,10 +257,10 @@ sequenceDiagram
     SM->>O: restore session
     O->>CA: analyze objective/facts
     CA-->>O: objective=balance, fact=checking
-    O->>JM: create short-lived balance job
-    JM-->>O: job active, priority high
-    O->>DE: which job + next step?
-    DE-->>O: continue balance job
+    O->>GM: create balance goal from balance skill
+    GM-->>O: goal active, priority high
+    O->>DE: which goal + next step?
+    DE-->>O: advance balance skill plan
     O->>RT: run account_balance
     RT->>API: get checking balance
     API-->>RT: balance result
@@ -263,7 +268,7 @@ sequenceDiagram
     O->>RC: compose balance response
     RC->>GR: validate
     GR-->>M: Your checking balance is ...
-    O->>JM: complete job
+    O->>GM: complete goal
 ```
 
 **Speaker notes:**
@@ -281,8 +286,7 @@ sequenceDiagram
     participant M as Member
     participant O as Orchestrator
     participant CA as Analyzer
-    participant JM as Job Manager
-    participant PE as Planning Engine
+    participant GM as Goal Manager
     participant DE as Decision Engine
     participant RT as Transfer Skill
     participant RC as Response Composer
@@ -291,8 +295,8 @@ sequenceDiagram
     M->>O: I want to transfer money
     O->>CA: analyze
     CA-->>O: objective=transfer, missing amount/source/destination
-    O->>JM: create transfer job
-    O->>PE: create deterministic execution plan
+    O->>GM: create transfer goal from transfer skill
+    Note over O,GM: Skill definition supplies the deterministic execution plan
     O->>DE: next safe step?
     DE-->>O: ask for missing amount/source/destination
     O->>RC: compose clarification
@@ -302,7 +306,7 @@ sequenceDiagram
     M->>O: $500 from checking to savings
     O->>CA: extract facts
     CA-->>O: amount=500, source=checking, destination=savings
-    O->>JM: update job facts
+    O->>GM: update goal facts
     O->>DE: next safe step?
     DE-->>O: validate transfer
     O->>RT: validate accounts/funds
@@ -318,7 +322,7 @@ This is not old slot filling with prettier prompts. The member can provide infor
 
 # Slide 10: Sequence 3 Interruption and Resume
 
-## Interruptions do not break the conversation; they reprioritize jobs
+## Interruptions do not break the conversation; they reprioritize goals
 
 ```mermaid
 sequenceDiagram
@@ -326,39 +330,39 @@ sequenceDiagram
     participant M as Member
     participant O as Orchestrator
     participant CA as Analyzer
-    participant JM as Job Manager
+    participant GM as Goal Manager
     participant DE as Decision Engine
     participant BAL as Balance Skill
     participant TR as Transfer Skill
     participant RC as Response Composer
     participant GR as Guardrails
 
-    Note over JM: Transfer job waits for confirmation
+    Note over GM: Transfer goal waits for confirmation
     M->>O: Before I confirm, what is my checking balance?
     O->>CA: analyze latest turn
     CA-->>O: side question detected: balance inquiry
-    O->>JM: pause transfer and start balance job
-    JM-->>O: transfer=paused, balance=active priority high
-    O->>DE: which job should advance?
-    DE-->>O: advance balance job
+    O->>GM: pause transfer and create balance goal
+    GM-->>O: transfer=paused, balance=active priority high
+    O->>DE: which goal should advance?
+    DE-->>O: advance balance goal
     O->>BAL: get checking balance
     BAL-->>O: balance result
     O->>RC: compose answer and resume prompt
     RC->>GR: validate
     GR-->>M: Balance returned. Continue the transfer?
-    O->>JM: balance complete and transfer paused
+    O->>GM: balance complete and transfer paused
 
     M->>O: Yes, continue
     O->>CA: analyze resume intent
-    O->>JM: resume transfer job
-    JM-->>O: transfer=active
+    O->>GM: resume transfer goal
+    GM-->>O: transfer=active
     O->>DE: next step in transfer plan?
     DE-->>O: request confirmation again
     O->>TR: continue deterministic transfer flow
 ```
 
 **Speaker notes:**
-This is one of the most important slides. Traditional bots often treat this as an intent switch and lose the first flow. Our platform treats it as job prioritization. The transfer is paused, not forgotten.
+This is one of the most important slides. Traditional bots often treat this as an intent switch and lose the first flow. Our platform treats it as goal prioritization. The transfer is paused, not forgotten.
 
 ---
 
@@ -372,16 +376,16 @@ sequenceDiagram
     participant M as Member
     participant WS as WebSocket Gateway
     participant O as Orchestrator
-    participant JM as Job Manager
+    participant GM as Goal Manager
     participant H as Handoff Skill
     participant CRM as Agent Routing / CRM
     participant A as Live Agent
 
     M->>WS: I want to talk to a person
     WS->>O: message.created
-    O->>JM: pause/escalate active jobs
+    O->>GM: pause/escalate active goals
     O->>H: create handoff context
-    H->>CRM: create case with summary, facts, job state
+    H->>CRM: create case with summary, facts, goal state
     CRM-->>A: assign conversation
     A->>WS: agent.connected
     WS-->>M: You're connected to a specialist.
@@ -392,13 +396,13 @@ sequenceDiagram
 ```
 
 **Speaker notes:**
-The live agent should not start blind. They receive the objective, active jobs, facts collected, tool outcomes, and reason for handoff. This is a better experience for both member and agent.
+The live agent should not start blind. They receive the objective, active goals, facts collected, tool outcomes, and reason for handoff. This is a better experience for both member and agent.
 
 ---
 
 # Slide 12: Sequence 5 Complex Objective Decomposition
 
-## Target state: one member objective can create multiple platform jobs
+## Target state: one member objective can create multiple platform goals
 
 ```mermaid
 sequenceDiagram
@@ -406,8 +410,7 @@ sequenceDiagram
     participant M as Member
     participant O as Orchestrator
     participant CA as Analyzer
-    participant JM as Job Manager
-    participant PE as Planning Engine
+    participant GM as Goal Manager
     participant DE as Decision Engine
     participant SR as Skill Registry
     participant RC as Response Composer
@@ -415,19 +418,18 @@ sequenceDiagram
     M->>O: I'm traveling to Europe next month. Help me get ready financially.
     O->>CA: analyze broad objective
     CA-->>O: objective includes travel readiness
-    O->>JM: decompose objective into jobs
-    JM-->>O: jobs: travel notice, card readiness, cash/ATM guidance, insurance FAQ
-    O->>PE: create plans per job
-    O->>DE: choose highest priority job
+    O->>SR: resolve matching skill definitions
+    SR-->>O: available skills + declared constraints
+    O->>GM: create goals from matching skill definitions
+    GM-->>O: goals: travel notice, card readiness, cash/ATM guidance, insurance FAQ
+    O->>DE: choose highest priority goal
     DE-->>O: start travel notice / card readiness clarification
-    O->>SR: resolve needed capabilities
-    SR-->>O: available skills + constraints
     O->>RC: explain plan to member
     RC-->>M: I can help with card travel notice, ATM access, and coverage questions. Let's start with your travel dates.
 ```
 
 **Speaker notes:**
-This is where the platform becomes more than a chatbot. A broad human objective can map to multiple jobs. The platform can explain progress and work through them in priority order.
+This is where the platform becomes more than a chatbot. A broad human objective can map to multiple goals, each derived from a matching skill definition. The platform can explain progress and work through them in priority order while executing each skill's declared plan and governance.
 
 ---
 
@@ -442,7 +444,7 @@ flowchart LR
     APP --> LG[LangGraph Runtime]
     LG --> BED[Amazon Bedrock\nConverse / ConverseStream]
     APP --> BGR[Bedrock Guardrails\nApplyGuardrail]
-    APP --> DB[(Session + Job Store)]
+    APP --> DB[(Session + Goal Store)]
     APP --> ENT[Enterprise APIs]
     APP --> OBS[CloudWatch / X-Ray / SIEM]
 ```
@@ -462,7 +464,7 @@ The model provider and guardrail provider are replaceable adapters. The platform
 | Slot prompts per flow | Progressive fact gathering |
 | Code hooks per intent | Declarative skills + typed tools |
 | Governance buried in code and prompts | Capability-owned declarations, platform-enforced controls |
-| Intent switch loses context | Jobs pause, resume, reprioritize |
+| Intent switch loses context | Goals pause, resume, reprioritize |
 | Channel-specific behavior | Shared platform, channel-specific formatting |
 | Prompt text buried in flows | Response contracts and templates |
 | Hard to explain failures | Immutable version, risk tier, decision, tool, and outcome evidence |
@@ -482,23 +484,25 @@ governance, not decentralized enforcement.
 ## The architecture in one slide
 
 1. Members express objectives.
-2. The platform creates one or more jobs.
-3. Each job owns an execution plan.
-4. The Decision Engine advances the right job each turn.
-5. Skills declare risk tier, execution mode, and permitted controls.
-6. The platform validates, enforces, and audits those declarations.
+2. The platform creates one or more goals from matching skill definitions.
+3. Each skill definition declares its type, execution plan, validation, controls, and policies.
+4. The Decision Engine advances the right goal through its skill-defined plan.
+5. The platform executes that plan and enforces the declared governance.
+6. The platform validates and audits the selected skill, decisions, and outcomes.
 7. Response Composer shapes the experience.
 8. The model advises; the platform decides and persists.
 
 ```mermaid
 flowchart LR
-    O[Objective] --> J[Jobs]
-    J --> P[Execution Plans]
+    O[Objective] --> G[Goals]
+    G --> S[Selected Skill Definition]
+    S --> P[Type + Execution Plan]
+    S --> V[Validation + Controls + Policies]
     P --> D[Decision Engine]
-    D --> S[Skills]
-    S --> R[Response Composer]
-    R --> G[Guardrails]
-    G --> M[Member]
+    V --> E[Platform-governed Execution]
+    D --> E
+    E --> R[Response Composer]
+    R --> M[Member]
 ```
 
 **Final message:**
