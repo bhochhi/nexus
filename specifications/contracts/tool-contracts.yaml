@@ -1,0 +1,11 @@
+apiVersion: nexus.contracts/v1
+kind: ToolContractSet
+contracts:
+  - name: account_lookup
+    input: {type: object}
+    output: {type: object}
+    risk_tier: read_only
+  - name: internal_transfer
+    input: {type: object}
+    output: {type: object}
+    risk_tier: consequential

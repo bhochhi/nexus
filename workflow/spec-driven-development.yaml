@@ -1,0 +1,15 @@
+apiVersion: nexus.workflow/v1
+kind: DevelopmentWorkflow
+stages:
+  - specification_analysis
+  - specification_validation
+  - impact_analysis
+  - implementation_planning
+  - implementation
+  - independent_verification
+  - release_evidence
+  - promotion
+rules:
+  - Portable specs and contracts are authoritative; adapters do not redefine them.
+  - A consequential change requires an independent verifier before promotion.
+  - Generated evidence is reproducible from declared inputs and is not source of truth.

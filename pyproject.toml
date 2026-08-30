@@ -38,6 +38,7 @@ member-assistant-admin = "member_assistant.admin_cli:main"
 member-assistant-observability = "member_assistant.observability_cli:main"
 member-assistant-server = "member_assistant.server_cli:main"
 member-assistant-skills = "member_assistant.skill_cli:main"
+member-assistant-specs = "member_assistant.spec_workflow:main"
 member-assistant-member-ui = "member_assistant.ui_launcher:member_main"
 member-assistant-msr-ui = "member_assistant.ui_launcher:msr_main"
 

@@ -1,0 +1,22 @@
+apiVersion: nexus.platform/v1
+kind: PlatformFeature
+metadata:
+  name: governed-conversation-lifecycle
+  version: 1.0.0
+  owner: Agentic Conversation Platform
+behavior:
+  objective_to_goal:
+    description: A member objective can produce one or more platform goals.
+  goal_to_skill:
+    description: Each active goal selects one governed business skill.
+  skill_to_plan:
+    description: A selected skill supplies an execution plan with ordered steps.
+  interruption:
+    description: A new goal pauses rather than silently discards resumable work.
+acceptance:
+  - id: multi-goal-safe-ordering
+    given: A member asks for a balance and a transfer.
+    then: The read-only goal may complete before the consequential plan requests confirmation.
+  - id: interruption-preserves-plan
+    given: A goal needs more input and the member changes topic.
+    then: The original plan remains resumable after the new goal completes.

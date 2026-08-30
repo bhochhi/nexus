@@ -23,6 +23,21 @@ but is not an application runtime dependency.
   uses the same WebSocket contract intended for a future browser chat UI.
 - Provider-neutral structured tracing with console, in-memory test, and local Langfuse/OpenTelemetry sinks. Content is redacted and session identifiers are hashed by default.
 - Typed mock adapters for member profile, knowledge, accounts, transfers, navigation, and live support.
+- A portable, spec-driven engineering workflow. Shared platform feature specs and
+  machine-readable contracts live in `specifications/`; Codex, Copilot, and
+  Claude Code adapters in `workflow/adapters/` only point to that source.
+
+### Spec-driven development workflow
+
+Use `member-assistant-specs validate` to validate portable platform specs and
+contracts. `member-assistant-specs select-stage --task "..."` selects and emits
+the active lifecycle stage for normal agent use; `--stage` gives CI and humans a
+deterministic entry point. `member-assistant-specs evidence <files...>` emits
+sorted SHA-256 release evidence without generating a second source of truth.
+
+The terminology is intentional: a member objective becomes one or more goals;
+a goal selects a skill; a skill supplies a plan of ordered steps. Versioned
+business `SKILL.md` artifacts and their publication behavior remain unchanged.
 
 ## Setup
 

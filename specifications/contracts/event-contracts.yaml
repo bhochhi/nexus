@@ -1,0 +1,7 @@
+apiVersion: nexus.contracts/v1
+kind: EventContractSet
+contracts:
+  - name: skill_gap
+    payload: {type: object}
+  - name: turn.completed
+    payload: {type: object}
