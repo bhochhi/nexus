@@ -1,5 +1,5 @@
 apiVersion: nexus.catalog/v1
-revision: 18
+revision: 20
 skills:
   approved_knowledge:
     version: 2.0.0
