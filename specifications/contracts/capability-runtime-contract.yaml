@@ -1,0 +1,49 @@
+apiVersion: nexus.contracts/v1
+kind: CapabilityRuntimeContractSet
+contracts:
+  - name: capability-runtime
+    version: 1
+    authoring_profiles:
+      declarative: knowledge
+      guided: guided_resolution
+      navigation: navigation
+      deterministic: deterministic_workflow
+      human_handoff: human_handoff
+    risk_tiers:
+      - informational
+      - navigation
+      - read_only
+      - consequential
+      - handoff
+    interaction_modes:
+      - direct
+      - guided
+    execution_modes:
+      - response
+      - knowledge_retrieval
+      - tool_query
+      - navigation
+      - workflow
+      - handoff
+    lifecycle_modes:
+      - synchronous
+    workflow_operations:
+      - call_tool
+      - collect
+      - confirm
+      - respond
+      - select
+      - set
+      - validate
+      - validate_decimal
+    validation_rules:
+      - not_equal
+      - truthy
+    invariants:
+      - A consequential tool call must immediately follow confirmation.
+      - Confirmation is supported only for consequential deterministic workflows.
+      - A workflow can invoke only declared tools and installed tool actions.
+      - Durable plans remain pinned to an exact skill version and artifact hash.
+    platform_features:
+      - PF-CONVERSATION-LIFECYCLE
+      - PF-CAPABILITY-AUTHORING-DELIVERY

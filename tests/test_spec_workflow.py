@@ -1,5 +1,8 @@
 import json
 
+import yaml
+
+from member_assistant.catalog import BUILTIN_ARCHETYPES, RISK_TIERS, WORKFLOW_OPERATIONS
 from member_assistant.config import PROJECT_ROOT
 from member_assistant.spec_workflow import STAGES, evidence, main, select_stage, validate
 
@@ -9,6 +12,7 @@ def test_portable_specs_validate_without_loading_business_skill_artifacts():
 
     assert result["valid"] is True
     assert "specifications/platform/features/conversation-lifecycle.md" in result["features"]
+    assert "specifications/platform/features/capability-authoring-and-delivery.md" in result["features"]
     assert "specifications/capabilities/internal-transfer/CAPABILITY.md" in result["capabilities"]
 
 
@@ -39,6 +43,21 @@ def test_capability_archetype_templates_share_the_human_readable_standard():
             "## Verification",
         ):
             assert heading in body
+
+
+def test_published_capability_surface_matches_runtime_primitives():
+    path = (
+        PROJECT_ROOT
+        / "specifications"
+        / "contracts"
+        / "capability-runtime-contract.yaml"
+    )
+    contract_set = yaml.safe_load(path.read_text(encoding="utf-8"))
+    surface = contract_set["contracts"][0]
+
+    assert set(surface["authoring_profiles"].values()) == BUILTIN_ARCHETYPES
+    assert set(surface["risk_tiers"]) == RISK_TIERS
+    assert set(surface["workflow_operations"]) == WORKFLOW_OPERATIONS
 
 
 def test_cli_announces_stage_and_emits_reproducible_evidence(capsys):

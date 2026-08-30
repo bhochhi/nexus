@@ -11,5 +11,7 @@ stages:
   - promotion
 rules:
   - Portable specs and contracts are authoritative; adapters do not redefine them.
+  - Impact analysis classifies work as capability-only, connector extension, or platform extension.
+  - A skill cannot introduce an unsupported platform primitive implicitly.
   - A consequential change requires an independent verifier before promotion.
   - Generated evidence is reproducible from declared inputs and is not source of truth.

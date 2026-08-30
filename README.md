@@ -38,6 +38,9 @@ sorted SHA-256 release evidence without generating a second source of truth.
 The terminology is intentional: a member objective becomes one or more goals;
 a goal selects a skill; a skill supplies a plan of ordered steps. Versioned
 business `SKILL.md` artifacts and their publication behavior remain unchanged.
+See [docs/spec-driven-development.md](docs/spec-driven-development.md) for the
+complete authoring workflow, platform-impact classification, browser authoring
+vision, and capability publication boundary.
 
 ## Setup
 
