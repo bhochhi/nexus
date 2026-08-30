@@ -352,6 +352,11 @@ capability-specific contracts, tests, and evaluations live with it as one
 authoring package. See `specifications/capabilities/README.md` and the
 archetype templates in `specifications/templates/capabilities/`.
 
+Every current POC capability now has such a package. Published catalog versions
+remain immutable baselines; next-version candidates add
+`metadata.capability` traceability and are not loaded until separately published
+and activated.
+
 ## Publication and call flow
 
 ```text

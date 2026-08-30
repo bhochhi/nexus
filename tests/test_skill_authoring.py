@@ -35,6 +35,16 @@ def test_every_catalog_capability_is_a_versioned_skill_markdown():
     assert loaded.errors == {}
 
 
+def test_existing_published_hashes_remain_stable_with_optional_traceability():
+    catalog = PROJECT_ROOT / "skills" / "catalog"
+    active = yaml.safe_load((catalog / "active.yaml").read_text(encoding="utf-8"))
+    compiler = SkillMarkdownCompiler()
+
+    for entry in active["skills"].values():
+        artifact = catalog / entry["artifact"]
+        assert compiler.compile(artifact).definition.artifact_hash == entry["artifact_hash"]
+
+
 def _guided_source(path: Path, version: str, label: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(

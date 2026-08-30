@@ -10,3 +10,15 @@ Rules:
 - If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
 - Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
 - After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+
+## Spec-driven development
+
+For platform, contract, connector, capability, test, or release work, use the
+portable workflow in `workflow/skills/nexus-spec-driven-development/SKILL.md`.
+Read `specifications/constitution.md` first, infer the active stage from task
+context, and announce `Workflow stage: <stage>`.
+
+The constitution, specifications, contracts, and portable workflow skills are
+authoritative. This file only makes them discoverable to Codex. Do not edit an
+immutable `skills/catalog/<name>/<version>/SKILL.md`; develop the next candidate
+in its `specifications/capabilities/<name>/` package.

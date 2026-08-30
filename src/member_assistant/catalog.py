@@ -138,6 +138,7 @@ class SkillDefinition:
     interaction: str = "guided"
     execution: str = "workflow"
     lifecycle: str = "synchronous"
+    traceability: Mapping[str, Any] = field(default_factory=dict)
     artifact_hash: str = ""
 
     @classmethod
@@ -428,6 +429,11 @@ class SkillDefinition:
         behavior = value.get("behavior", {})
         if not isinstance(behavior, dict):
             raise CatalogValidationError("{}: behavior must be an object".format(source.name))
+        traceability = value.get("traceability", {})
+        if not isinstance(traceability, dict):
+            raise CatalogValidationError(
+                "{}: traceability must be an object".format(source.name)
+            )
         definition = cls(
             name=value["name"].strip(),
             version=str(value["version"]),
@@ -456,6 +462,7 @@ class SkillDefinition:
             interaction=str(behavior.get("interaction", default_interaction)),
             execution=str(behavior.get("execution", default_execution)),
             lifecycle=str(behavior.get("lifecycle", default_lifecycle)),
+            traceability=traceability,
         )
         return replace(definition, artifact_hash=_artifact_hash(value))
 

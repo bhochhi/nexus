@@ -58,6 +58,10 @@ and evidence exist.
 
 Explicit commands may provide repeatable CI entry points, but people should be
 able to describe a change naturally without knowing agent-specific commands.
+The portable agent entrypoint is
+`workflow/skills/nexus-spec-driven-development/SKILL.md`; its eight stage skills
+contain the detailed operating instructions. `AGENTS.md`,
+`.github/copilot-instructions.md`, and `CLAUDE.md` are thin discovery adapters.
 
 ## Mandatory platform-impact decision
 

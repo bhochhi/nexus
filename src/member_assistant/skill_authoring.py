@@ -189,6 +189,29 @@ class SkillMarkdownCompiler:
             },
             "workflow": workflow,
         }
+        capability = metadata.get("capability")
+        if capability is not None:
+            capability = self._mapping(capability, "metadata.capability", source)
+            capability_id = str(capability.get("id", "")).strip()
+            specification = str(capability.get("specification", "")).strip()
+            acceptance_ids = capability.get("acceptance", [])
+            if (
+                not capability_id
+                or not specification
+                or not isinstance(acceptance_ids, list)
+                or not acceptance_ids
+                or not all(str(identifier).strip() for identifier in acceptance_ids)
+            ):
+                raise CatalogValidationError(
+                    "{}: metadata.capability requires id, specification, and acceptance IDs".format(
+                        source.name
+                    )
+                )
+            payload["traceability"] = {
+                "capability_id": capability_id,
+                "specification": specification,
+                "acceptance": [str(identifier) for identifier in acceptance_ids],
+            }
         if api_version == SKILL_API_VERSION or "sample_utterances" in intent:
             payload["sample_utterances"] = intent.get("sample_utterances", [])
         return payload, acceptance

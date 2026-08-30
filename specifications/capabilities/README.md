@@ -22,6 +22,29 @@ implementation and must trace its acceptance cases back to stable capability
 acceptance IDs. Publication copies a validated skill into the immutable catalog;
 the published catalog copy is not edited in place.
 
+Candidate skills record traceability under `metadata.capability`: capability ID,
+repository specification path, and the complete acceptance-ID set. Executable
+acceptance scenarios reuse those stable IDs. The compiler includes this
+traceability in the candidate artifact hash.
+
+`implementation.skill` points to the current candidate in the package.
+`implementation.publishedSkill` may point to the immutable POC artifact that is
+currently released; it is historical/runtime evidence, not the file to edit.
+
+## Current capability packages
+
+| Capability | Authoring profile | Candidate skill | Published baseline |
+| --- | --- | --- | --- |
+| Approved knowledge | declarative | `2.1.0` | `2.0.0` |
+| Guided balance | guided | `2.2.0` | `2.1.0` |
+| Internal transfer | deterministic | `2.1.0` | `2.0.0` |
+| Live-agent handoff | human handoff | `3.1.0` | `3.0.0` |
+| Online-ID recovery | navigation | `3.1.0` | `3.0.0` |
+
+Candidate versions are not active merely because they exist in the source
+package. They must pass verification and the separate publication/activation
+workflow.
+
 ## Archetype templates
 
 Choose the closest template from `specifications/templates/capabilities/`:

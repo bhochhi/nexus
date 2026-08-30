@@ -42,6 +42,12 @@ See [docs/spec-driven-development.md](docs/spec-driven-development.md) for the
 complete authoring workflow, platform-impact classification, browser authoring
 vision, and capability publication boundary.
 
+The current approved-knowledge, guided-balance, internal-transfer,
+live-agent-handoff, and online-ID capabilities each have a Markdown business
+specification and a traced next-version candidate skill under
+`specifications/capabilities/`. Development agents share the constitution and
+stage skills under `workflow/skills/` through thin vendor adapters.
+
 ## Setup
 
 Python 3.9 or later is supported by the base POC. Use Python 3.10 or later for

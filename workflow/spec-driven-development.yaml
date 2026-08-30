@@ -1,5 +1,7 @@
 apiVersion: nexus.workflow/v1
 kind: DevelopmentWorkflow
+constitution: specifications/constitution.md
+routerSkill: workflow/skills/nexus-spec-driven-development/SKILL.md
 stages:
   - specification_analysis
   - specification_validation
@@ -9,6 +11,15 @@ stages:
   - independent_verification
   - release_evidence
   - promotion
+stageSkills:
+  specification_analysis: workflow/skills/nexus-specification-analysis/SKILL.md
+  specification_validation: workflow/skills/nexus-specification-validation/SKILL.md
+  impact_analysis: workflow/skills/nexus-impact-analysis/SKILL.md
+  implementation_planning: workflow/skills/nexus-implementation-planning/SKILL.md
+  implementation: workflow/skills/nexus-implementation/SKILL.md
+  independent_verification: workflow/skills/nexus-independent-verification/SKILL.md
+  release_evidence: workflow/skills/nexus-release-evidence/SKILL.md
+  promotion: workflow/skills/nexus-promotion/SKILL.md
 rules:
   - Portable specs and contracts are authoritative; adapters do not redefine them.
   - Impact analysis classifies work as capability-only, connector extension, or platform extension.

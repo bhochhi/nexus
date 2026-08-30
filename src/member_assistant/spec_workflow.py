@@ -23,6 +23,17 @@ STAGES = (
     "promotion",
 )
 
+STAGE_SKILLS = {
+    "specification_analysis": "nexus-specification-analysis",
+    "specification_validation": "nexus-specification-validation",
+    "impact_analysis": "nexus-impact-analysis",
+    "implementation_planning": "nexus-implementation-planning",
+    "implementation": "nexus-implementation",
+    "independent_verification": "nexus-independent-verification",
+    "release_evidence": "nexus-release-evidence",
+    "promotion": "nexus-promotion",
+}
+
 CAPABILITY_ARCHETYPES = (
     "declarative",
     "guided",
@@ -123,9 +134,122 @@ def validate(root: Path = PROJECT_ROOT) -> Dict[str, Any]:
     root = Path(root)
     workflow_path = root / "workflow" / "spec-driven-development.yaml"
     workflow = _load_yaml(workflow_path)
-    _require(workflow, ("apiVersion", "kind", "stages", "rules"), workflow_path)
+    _require(
+        workflow,
+        (
+            "apiVersion",
+            "kind",
+            "constitution",
+            "routerSkill",
+            "stages",
+            "stageSkills",
+            "rules",
+        ),
+        workflow_path,
+    )
     if tuple(workflow["stages"]) != STAGES:
         raise SpecificationValidationError("{}: stages must use the canonical lifecycle".format(workflow_path))
+    expected_stage_skills = {
+        stage: "workflow/skills/{}/SKILL.md".format(skill_name)
+        for stage, skill_name in STAGE_SKILLS.items()
+    }
+    if workflow["stageSkills"] != expected_stage_skills:
+        raise SpecificationValidationError(
+            "{}: stageSkills must map every canonical stage".format(workflow_path)
+        )
+    if workflow["constitution"] != "specifications/constitution.md":
+        raise SpecificationValidationError(
+            "{}: constitution must reference the portable source".format(
+                workflow_path
+            )
+        )
+    if (
+        workflow["routerSkill"]
+        != "workflow/skills/nexus-spec-driven-development/SKILL.md"
+    ):
+        raise SpecificationValidationError(
+            "{}: routerSkill must reference the portable router".format(
+                workflow_path
+            )
+        )
+
+    workflow_skill_paths = []
+    for stage in STAGES:
+        skill_path = (
+            root
+            / "workflow"
+            / "skills"
+            / STAGE_SKILLS[stage]
+            / "SKILL.md"
+        )
+        skill, body = _load_markdown(skill_path)
+        _require(skill, ("name", "description"), skill_path)
+        if skill["name"] != STAGE_SKILLS[stage]:
+            raise SpecificationValidationError(
+                "{}: skill name must match its stage mapping".format(skill_path)
+            )
+        if "Workflow stage: {}".format(stage) not in body:
+            raise SpecificationValidationError(
+                "{}: skill must announce its workflow stage".format(skill_path)
+            )
+        workflow_skill_paths.append(skill_path)
+    router_path = (
+        root
+        / "workflow"
+        / "skills"
+        / "nexus-spec-driven-development"
+        / "SKILL.md"
+    )
+    router, router_body = _load_markdown(router_path)
+    _require(router, ("name", "description"), router_path)
+    if router["name"] != "nexus-spec-driven-development":
+        raise SpecificationValidationError(
+            "{}: invalid workflow router name".format(router_path)
+        )
+    for skill_name in STAGE_SKILLS.values():
+        if skill_name not in router_body:
+            raise SpecificationValidationError(
+                "{}: router does not reference {}".format(router_path, skill_name)
+            )
+    workflow_skill_paths.insert(0, router_path)
+
+    for adapter_path in (
+        root / "AGENTS.md",
+        root / ".github" / "copilot-instructions.md",
+        root / "CLAUDE.md",
+    ):
+        try:
+            adapter = adapter_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise SpecificationValidationError(
+                "{}: {}".format(adapter_path, exc)
+            ) from exc
+        if "workflow/skills/nexus-spec-driven-development/SKILL.md" not in adapter:
+            raise SpecificationValidationError(
+                "{}: adapter must reference the portable workflow".format(
+                    adapter_path
+                )
+            )
+
+    constitution_path = root / "specifications" / "constitution.md"
+    constitution, constitution_body = _load_markdown(constitution_path)
+    _require(constitution, ("apiVersion", "kind", "metadata"), constitution_path)
+    if constitution["kind"] != "PlatformConstitution":
+        raise SpecificationValidationError(
+            "{}: kind must be PlatformConstitution".format(constitution_path)
+        )
+    _require_headings(
+        constitution_body,
+        (
+            "Purpose",
+            "Principles",
+            "Specification authority",
+            "Safety and governance",
+            "Quality gates",
+            "Terminology",
+        ),
+        constitution_path,
+    )
 
     adr_paths = sorted((root / "specifications" / "platform" / "adr").glob("*.md"))
     feature_paths = sorted((root / "specifications" / "platform" / "features").glob("*.md"))
@@ -234,18 +358,86 @@ def validate(root: Path = PROJECT_ROOT) -> Dict[str, Any]:
             )
         acceptance_ids.update(path_acceptance_ids)
         implementation = capability.get("implementation", {})
+        if metadata["status"] == "approved" and not implementation:
+            raise SpecificationValidationError(
+                "{}: approved capability requires an implementation".format(path)
+            )
         if implementation:
             if not isinstance(implementation, dict):
                 raise SpecificationValidationError(
                     "{}: implementation must be an object".format(path)
                 )
-            skill_path = implementation.get("skill")
-            if skill_path and not (root / str(skill_path)).is_file():
+            skill_reference = implementation.get("skill")
+            if metadata["status"] == "approved" and not skill_reference:
                 raise SpecificationValidationError(
-                    "{}: referenced skill does not exist: {}".format(
-                        path, skill_path
+                    "{}: approved capability must reference a candidate skill".format(
+                        path
                     )
                 )
+            skill_path = root / str(skill_reference) if skill_reference else None
+            if skill_path is not None and not skill_path.is_file():
+                raise SpecificationValidationError(
+                    "{}: referenced skill does not exist: {}".format(
+                        path, skill_reference
+                    )
+                )
+            published_reference = implementation.get("publishedSkill")
+            if published_reference and not (root / str(published_reference)).is_file():
+                raise SpecificationValidationError(
+                    "{}: referenced published skill does not exist: {}".format(
+                        path, published_reference
+                    )
+                )
+            if skill_path is not None:
+                skill, _ = _load_markdown(skill_path)
+                _require(skill, ("apiVersion", "kind", "metadata", "acceptance"), skill_path)
+                if skill["kind"] != "Skill":
+                    raise SpecificationValidationError(
+                        "{}: kind must be Skill".format(skill_path)
+                    )
+                skill_metadata = skill["metadata"]
+                traceability = (
+                    skill_metadata.get("capability", {})
+                    if isinstance(skill_metadata, dict)
+                    else {}
+                )
+                if not isinstance(traceability, dict):
+                    raise SpecificationValidationError(
+                        "{}: metadata.capability must be an object".format(skill_path)
+                    )
+                expected_specification = str(path.relative_to(root))
+                if (
+                    traceability.get("id") != metadata["id"]
+                    or traceability.get("specification") != expected_specification
+                ):
+                    raise SpecificationValidationError(
+                        "{}: capability identity or specification reference does not match {}".format(
+                            skill_path, path
+                        )
+                    )
+                traced_acceptance = traceability.get("acceptance", [])
+                if set(str(item) for item in traced_acceptance) != set(
+                    path_acceptance_ids
+                ):
+                    raise SpecificationValidationError(
+                        "{}: traceability must list every capability acceptance ID".format(
+                            skill_path
+                        )
+                    )
+                skill_acceptance = skill.get("acceptance", [])
+                executable_ids = {
+                    str(item.get("id"))
+                    for item in skill_acceptance
+                    if isinstance(item, dict) and item.get("id")
+                }
+                if not executable_ids or not executable_ids.issubset(
+                    set(path_acceptance_ids)
+                ):
+                    raise SpecificationValidationError(
+                        "{}: executable acceptance IDs must reference capability criteria".format(
+                            skill_path
+                        )
+                    )
     for path in contract_paths:
         contract = _load_yaml(path)
         _require(contract, ("apiVersion", "kind", "contracts"), path)
@@ -254,6 +446,10 @@ def validate(root: Path = PROJECT_ROOT) -> Dict[str, Any]:
 
     return {
         "valid": True,
+        "constitution": str(constitution_path.relative_to(root)),
+        "workflow_skills": [
+            str(path.relative_to(root)) for path in workflow_skill_paths
+        ],
         "adrs": [str(path.relative_to(root)) for path in adr_paths],
         "features": [str(path.relative_to(root)) for path in feature_paths],
         "capabilities": [
