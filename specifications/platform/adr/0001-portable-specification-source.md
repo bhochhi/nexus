@@ -1,7 +1,27 @@
-# ADR 0001: Portable specifications are the engineering source of truth
+---
+apiVersion: nexus.platform/v1
+kind: ArchitectureDecision
+metadata:
+  id: ADR-0001
+  title: Portable specifications are the engineering source of truth
+  status: accepted
+  owners: [Agentic Conversation Platform]
+  decisionDate: 2026-08-30
+  supersedes: []
+enforcement:
+  invariants:
+    - id: INV-PORTABLE-SOURCE-001
+      statement: Vendor adapters must not redefine platform or capability behavior.
+  features: [PF-CONVERSATION-LIFECYCLE]
+  tests: [tests/test_spec_workflow.py]
+---
 
-- Status: accepted
-- Date: 2026-08-30
+# Portable specifications are the engineering source of truth
+
+## Context
+
+Several development agents must implement the same platform and business
+behavior without creating vendor-specific sources of truth.
 
 ## Decision
 
@@ -21,3 +41,21 @@ Every consequential change requires independent verification and recorded
 release evidence before promotion. An author may prepare a specification,
 implementation, or evidence, but may not approve their own consequential
 change. Vendor adapters contain only navigation and stage-announcement guidance.
+
+## Alternatives considered
+
+- Maintain a complete workflow for each agent vendor. Rejected because the
+  implementations would drift.
+- Keep all requirements in runtime skill artifacts. Rejected because platform
+  behavior and architectural decisions have a wider scope than one skill.
+
+## Enforcement
+
+`INV-PORTABLE-SOURCE-001` is enforced structurally by the portable specification
+validator and behaviorally by the linked platform feature acceptance criteria.
+
+## Supersession
+
+Clarifications may edit this file through Git. A new ADR is required only when
+the architectural decision changes; that ADR will list `ADR-0001` in
+`metadata.supersedes`.

@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 from typing import Any, Dict, Iterable, Optional, Sequence
 
 import yaml
@@ -21,6 +22,15 @@ STAGES = (
     "release_evidence",
     "promotion",
 )
+
+CAPABILITY_ARCHETYPES = (
+    "declarative",
+    "guided",
+    "navigation",
+    "deterministic",
+    "human_handoff",
+)
+CAPABILITY_STATUSES = ("draft", "in_review", "approved", "retired")
 
 _KEYWORDS = (
     ("release_evidence", ("evidence", "provenance", "release notes")),
@@ -61,10 +71,51 @@ def _load_yaml(path: Path) -> Dict[str, Any]:
     return value
 
 
+def _load_markdown(path: Path) -> tuple:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise SpecificationValidationError("{}: {}".format(path, exc)) from exc
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        raise SpecificationValidationError(
+            "{}: Markdown specification must start with YAML frontmatter".format(path)
+        )
+    try:
+        closing = next(
+            index
+            for index, line in enumerate(lines[1:], start=1)
+            if line.strip() == "---"
+        )
+    except StopIteration as exc:
+        raise SpecificationValidationError(
+            "{}: YAML frontmatter is not closed".format(path)
+        ) from exc
+    try:
+        frontmatter = yaml.safe_load("\n".join(lines[1:closing])) or {}
+    except yaml.YAMLError as exc:
+        raise SpecificationValidationError(
+            "{}: YAML frontmatter is invalid".format(path)
+        ) from exc
+    if not isinstance(frontmatter, dict):
+        raise SpecificationValidationError(
+            "{}: YAML frontmatter must be an object".format(path)
+        )
+    return frontmatter, "\n".join(lines[closing + 1 :]).strip()
+
+
 def _require(payload: Dict[str, Any], keys: Iterable[str], path: Path) -> None:
     missing = [key for key in keys if not payload.get(key)]
     if missing:
         raise SpecificationValidationError("{}: missing {}".format(path, ", ".join(missing)))
+
+
+def _require_headings(body: str, headings: Iterable[str], path: Path) -> None:
+    missing = [heading for heading in headings if "## {}".format(heading) not in body]
+    if missing:
+        raise SpecificationValidationError(
+            "{}: missing Markdown sections {}".format(path, ", ".join(missing))
+        )
 
 
 def validate(root: Path = PROJECT_ROOT) -> Dict[str, Any]:
@@ -76,22 +127,140 @@ def validate(root: Path = PROJECT_ROOT) -> Dict[str, Any]:
     if tuple(workflow["stages"]) != STAGES:
         raise SpecificationValidationError("{}: stages must use the canonical lifecycle".format(workflow_path))
 
-    feature_paths = sorted((root / "specifications" / "platform" / "features").glob("*.yaml"))
+    adr_paths = sorted((root / "specifications" / "platform" / "adr").glob("*.md"))
+    feature_paths = sorted((root / "specifications" / "platform" / "features").glob("*.md"))
+    capability_paths = sorted(
+        (root / "specifications" / "capabilities").glob("*/CAPABILITY.md")
+    )
     contract_paths = sorted((root / "specifications" / "contracts").glob("*.yaml"))
-    if not feature_paths or not contract_paths:
-        raise SpecificationValidationError("portable feature and contract specifications are required")
+    if not adr_paths or not feature_paths or not capability_paths or not contract_paths:
+        raise SpecificationValidationError(
+            "portable ADR, feature, capability, and contract specifications are required"
+        )
+    for path in adr_paths:
+        decision, body = _load_markdown(path)
+        _require(decision, ("apiVersion", "kind", "metadata", "enforcement"), path)
+        if decision["kind"] != "ArchitectureDecision":
+            raise SpecificationValidationError(
+                "{}: kind must be ArchitectureDecision".format(path)
+            )
+        _require_headings(
+            body,
+            (
+                "Context",
+                "Decision",
+                "Alternatives considered",
+                "Consequences",
+                "Enforcement",
+                "Supersession",
+            ),
+            path,
+        )
     for path in feature_paths:
-        feature = _load_yaml(path)
-        _require(feature, ("apiVersion", "kind", "metadata", "behavior", "acceptance"), path)
-        if feature["kind"] != "PlatformFeature" or not isinstance(feature["acceptance"], list):
-            raise SpecificationValidationError("{}: invalid platform feature contract".format(path))
+        feature, body = _load_markdown(path)
+        _require(feature, ("apiVersion", "kind", "metadata"), path)
+        if feature["kind"] != "PlatformFeature":
+            raise SpecificationValidationError(
+                "{}: kind must be PlatformFeature".format(path)
+            )
+        _require_headings(
+            body,
+            (
+                "Purpose",
+                "Required behavior",
+                "Acceptance criteria",
+                "Examples",
+                "Edge cases",
+                "Verification",
+            ),
+            path,
+        )
+    acceptance_ids = set()
+    for path in capability_paths:
+        capability, body = _load_markdown(path)
+        _require(
+            capability,
+            ("apiVersion", "kind", "metadata", "archetype", "risk"),
+            path,
+        )
+        if capability["kind"] != "Capability":
+            raise SpecificationValidationError(
+                "{}: kind must be Capability".format(path)
+            )
+        metadata = capability["metadata"]
+        if not isinstance(metadata, dict):
+            raise SpecificationValidationError(
+                "{}: metadata must be an object".format(path)
+            )
+        _require(metadata, ("id", "name", "status", "owner"), path)
+        if metadata["status"] not in CAPABILITY_STATUSES:
+            raise SpecificationValidationError(
+                "{}: unsupported capability status {}".format(
+                    path, metadata["status"]
+                )
+            )
+        if capability["archetype"] not in CAPABILITY_ARCHETYPES:
+            raise SpecificationValidationError(
+                "{}: unsupported capability archetype {}".format(
+                    path, capability["archetype"]
+                )
+            )
+        _require_headings(
+            body,
+            (
+                "Purpose and member value",
+                "Scope",
+                "Member scenarios",
+                "Required behavior",
+                "Acceptance criteria",
+                "Examples",
+                "Edge cases and failures",
+                "Governance and integrations",
+                "Verification",
+            ),
+            path,
+        )
+        path_acceptance_ids = re.findall(r"\*\*(AC-[A-Z0-9-]+)\s+—", body)
+        if not path_acceptance_ids:
+            raise SpecificationValidationError(
+                "{}: at least one stable acceptance criterion ID is required".format(path)
+            )
+        duplicates = acceptance_ids.intersection(path_acceptance_ids)
+        if duplicates:
+            raise SpecificationValidationError(
+                "{}: duplicate acceptance IDs {}".format(
+                    path, ", ".join(sorted(duplicates))
+                )
+            )
+        acceptance_ids.update(path_acceptance_ids)
+        implementation = capability.get("implementation", {})
+        if implementation:
+            if not isinstance(implementation, dict):
+                raise SpecificationValidationError(
+                    "{}: implementation must be an object".format(path)
+                )
+            skill_path = implementation.get("skill")
+            if skill_path and not (root / str(skill_path)).is_file():
+                raise SpecificationValidationError(
+                    "{}: referenced skill does not exist: {}".format(
+                        path, skill_path
+                    )
+                )
     for path in contract_paths:
         contract = _load_yaml(path)
         _require(contract, ("apiVersion", "kind", "contracts"), path)
         if not isinstance(contract["contracts"], list) or not contract["contracts"]:
             raise SpecificationValidationError("{}: contracts must be a non-empty list".format(path))
 
-    return {"valid": True, "features": [str(path.relative_to(root)) for path in feature_paths], "contracts": [str(path.relative_to(root)) for path in contract_paths]}
+    return {
+        "valid": True,
+        "adrs": [str(path.relative_to(root)) for path in adr_paths],
+        "features": [str(path.relative_to(root)) for path in feature_paths],
+        "capabilities": [
+            str(path.relative_to(root)) for path in capability_paths
+        ],
+        "contracts": [str(path.relative_to(root)) for path in contract_paths],
+    }
 
 
 def evidence(paths: Sequence[Path], root: Path = PROJECT_ROOT) -> Dict[str, Any]:

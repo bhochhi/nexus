@@ -16,7 +16,9 @@ audited background work, that entity can be specified separately.
 ## Layout
 
 - `platform/adr/` records durable architectural decisions.
-- `platform/features/` holds executable, shared conversational behavior.
+- `platform/features/` holds human-readable, executable shared conversational
+  behavior in Markdown.
+- `capabilities/` holds cohesive business capability authoring packages.
 - `contracts/` holds machine-readable tool and event contracts.
 - `workflow/` at the repository root defines the engineering lifecycle and
   contains provider adapters only; it is not a business or runtime contract.
@@ -26,6 +28,9 @@ Validate the portable artifacts with:
 ```bash
 member-assistant-specs validate
 ```
+
+Markdown carries purpose, scenarios, acceptance criteria, examples, and edge
+cases. YAML is reserved for small frontmatter and exact machine contracts.
 
 The command is deterministic and emits JSON suitable for CI. `select-stage`
 uses task text to choose and announce one lifecycle stage; explicit stage input

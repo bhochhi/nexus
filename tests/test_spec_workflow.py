@@ -8,7 +8,8 @@ def test_portable_specs_validate_without_loading_business_skill_artifacts():
     result = validate(PROJECT_ROOT)
 
     assert result["valid"] is True
-    assert "specifications/platform/features/conversation-lifecycle.yaml" in result["features"]
+    assert "specifications/platform/features/conversation-lifecycle.md" in result["features"]
+    assert "specifications/capabilities/internal-transfer/CAPABILITY.md" in result["capabilities"]
 
 
 def test_stage_selection_is_contextual_or_explicit():
@@ -17,6 +18,27 @@ def test_stage_selection_is_contextual_or_explicit():
     assert select_stage("Prepare release evidence")["active_stage"] == "release_evidence"
     assert select_stage("anything", "promotion")["active_stage"] == "promotion"
     assert tuple(STAGES)[0] == "specification_analysis"
+
+
+def test_capability_archetype_templates_share_the_human_readable_standard():
+    template_directory = PROJECT_ROOT / "specifications" / "templates" / "capabilities"
+    expected = {"declarative", "guided", "navigation", "deterministic", "human-handoff"}
+
+    assert {path.stem for path in template_directory.glob("*.md")} == expected
+    for path in template_directory.glob("*.md"):
+        body = path.read_text(encoding="utf-8")
+        for heading in (
+            "## Purpose and member value",
+            "## Scope",
+            "## Member scenarios",
+            "## Required behavior",
+            "## Acceptance criteria",
+            "## Examples",
+            "## Edge cases and failures",
+            "## Governance and integrations",
+            "## Verification",
+        ):
+            assert heading in body
 
 
 def test_cli_announces_stage_and_emits_reproducible_evidence(capsys):

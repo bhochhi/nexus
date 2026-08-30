@@ -345,10 +345,17 @@ Tier 3 validation / review / confirmation / tool execution
 grounded response and durable outcome
 ```
 
+The spec-driven development workflow adds an upstream, Markdown-first
+`CAPABILITY.md`. It describes business purpose, scenarios, required behavior,
+acceptance criteria, examples, and edge cases. The candidate `SKILL.md`, any
+capability-specific contracts, tests, and evaluations live with it as one
+authoring package. See `specifications/capabilities/README.md` and the
+archetype templates in `specifications/templates/capabilities/`.
+
 ## Publication and call flow
 
 ```text
-authoring tool / Git
+ CAPABILITY.md / authoring tool / Git
         |
         v
  candidate SKILL.md
@@ -403,9 +410,17 @@ put the same artifacts and pointers behind an authenticated publication API and
 durable object store, then notify runtimes through an event or
 cache-invalidation channel.
 
-## One authoring file, not four required files
+## One runtime artifact, cohesive authoring package
 
-The frontmatter groups the information an authoring UI would collect:
+Only `CAPABILITY.md` is required for an initial business draft. The development
+workflow produces a candidate `SKILL.md` and adds contracts, tests, or
+evaluations only when they are necessary. This keeps simple capabilities simple
+without forcing complex capabilities into one difficult-to-read document.
+
+The published runtime unit is still exactly one immutable `SKILL.md` artifact.
+The catalog does not load `CAPABILITY.md`, draft tests, or evaluation material.
+
+The `SKILL.md` frontmatter groups the information the runtime compiler needs:
 
 - root identity: schema version, stable skill name, and immutable skill version;
 - root discovery: member-facing display name, description, and first-class
@@ -423,9 +438,11 @@ The frontmatter groups the information an authoring UI would collect:
 
 For v3, the Markdown body is the activated model instruction surface. It
 explains purpose, input semantics, conversation behavior, and safety boundaries
-in business language.
-Acceptance scenarios live in the same file for the POC; a future authoring tool
-can render them as form fields instead of exposing YAML.
+in business language. Rich business documentation and stable acceptance IDs
+live in `CAPABILITY.md`; executable skill acceptance entries trace back to those
+IDs. Acceptance scenarios remain in the skill artifact for publication checks,
+while a future authoring UI can render both files as forms without exposing
+YAML.
 
 Simple skills do not need authors to write a workflow. `static_response`,
 `tool_response`, `guided_selection`, and `navigation` recipes compile to the
@@ -434,6 +451,28 @@ as internal transfer—authors a workflow inline. More reusable recipes can be
 added to the compiler without changing the catalog or runtime contract.
 
 See `skills/available/online_id_recovery/SKILL.md` for the navigation example.
+See `specifications/capabilities/internal-transfer/CAPABILITY.md` for the
+human-readable specification behind a deterministic workflow.
+
+## Lifecycle without runtime complexity
+
+Authoring and distribution use separate state machines:
+
+```text
+CAPABILITY.md: draft -> in_review -> approved -> retired
+SKILL.md:      candidate -> staged/published -> active -> deactivated
+```
+
+Approval authorizes a particular source revision to become a release candidate.
+Publishing stores an immutable version/hash. Activation changes only the small
+catalog routing pointer watched by running assistants. Rollback points that
+index at an earlier published version; it does not rebuild the graph or mutate
+an in-flight task. Durable tasks remain pinned to their original version/hash.
+
+The local POC does not pretend to provide enterprise approval RBAC. Git review
+records source approval, while publisher events record staged publication,
+activation, rollback, and deactivation. A production catalog can enforce the
+same states with authenticated approvals without changing runtime discovery.
 
 ## Archetypes are presets, not a closed capability taxonomy
 
