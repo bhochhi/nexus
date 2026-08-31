@@ -132,9 +132,36 @@ class DeclarativeSkillExecutor(SkillExecutor):
             observation.update(
                 output=context.observability.content(result, summary),
                 metadata={"tool_status": "success"},
-            )
+        )
         if not result and step.get("on_empty"):
-            return self._configured_failure(step["on_empty"], task, completed_steps)
+            failure = dict(step["on_empty"])
+            ambiguity_template = failure.get("ambiguous_choice_template")
+            if ambiguity_template:
+                reference = str(arguments.get("reference", "")).casefold()
+                tokens = set(re.findall(r"[a-z]+", reference))
+                if "saving" in tokens:
+                    tokens.add("savings")
+                account_types = tokens.intersection({"checking", "savings"})
+                if len(account_types) == 1:
+                    account_type = next(iter(account_types))
+                    eligible = context.tools.invoke(
+                        "mock_accounts",
+                        "list_eligible_balances",
+                        {"member_ref": context.member_ref},
+                    )
+                    choices = [
+                        item
+                        for item in eligible
+                        if item.get("account_type") == account_type
+                    ]
+                    if len(choices) > 1:
+                        failure["response"] = str(ambiguity_template).format(
+                            account_type=account_type,
+                            choices="; ".join(
+                                str(item["label"]) for item in choices
+                            ),
+                        )
+            return self._configured_failure(failure, task, completed_steps)
         if step.get("save_as"):
             variables[step["save_as"]] = result
         self._complete_step(step, completed_steps)

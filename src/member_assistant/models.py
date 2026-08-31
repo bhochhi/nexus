@@ -60,6 +60,7 @@ class ConversationState(TypedDict):
     pending_handoff_offer: Optional[PendingHandoffOffer]
     pending_task_transition: Optional[PendingTaskTransition]
     member_profile: Dict[str, Any]
+    reception_variant: Optional[int]
     greeted: bool
     no_goal_turn_count: int
     selected_skill: Optional[str]
@@ -104,6 +105,7 @@ def new_conversation_state() -> ConversationState:
         "pending_handoff_offer": None,
         "pending_task_transition": None,
         "member_profile": {},
+        "reception_variant": None,
         "greeted": False,
         "no_goal_turn_count": 0,
         "selected_skill": None,

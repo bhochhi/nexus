@@ -108,12 +108,12 @@ skills:
             '2003': '2003'
   internal_transfer:
     version: 2.0.0
-    artifact_hash: 79dce9215262a4a9b69f17181c435793e71cdeca907a65f2665958c846edae51
+    artifact_hash: d8bea25d1a03eedf897a1291250cbf423b7976286240158bd6c19d09552b0e7e
     artifact: internal_transfer/2.0.0/SKILL.md
     routing:
       name: internal_transfer
       version: 2.0.0
-      artifact_hash: 79dce9215262a4a9b69f17181c435793e71cdeca907a65f2665958c846edae51
+      artifact_hash: d8bea25d1a03eedf897a1291250cbf423b7976286240158bd6c19d09552b0e7e
       archetype: deterministic_workflow
       description: Collects, validates, reviews, confirms, and submits one mock internal
         transfer.

@@ -80,11 +80,7 @@ steps:
     fields:
       - name: source_account
         prompt: Which account should the money come from?
-      - name: destination_account
-        prompt: Which account should receive the money?
-      - name: amount
-        prompt: How much would you like to transfer?
-    completed_step: collected transfer details
+    completed_step: collected source account
   - op: call_tool
     tool: mock_accounts
     action: resolve_account
@@ -94,7 +90,13 @@ steps:
     on_empty:
       status: awaiting_input
       field: source_account
-      response: I couldn't match the source account. Which account should the money come from?
+      response: I couldn't match the source account. Please provide its account type and last four digits.
+      ambiguous_choice_template: "I found multiple {account_type} accounts. Which account would you like: {choices}?"
+  - op: collect
+    fields:
+      - name: destination_account
+        prompt: Which account should receive the money?
+    completed_step: collected destination account
   - op: call_tool
     tool: mock_accounts
     action: resolve_account
@@ -104,7 +106,8 @@ steps:
     on_empty:
       status: awaiting_input
       field: destination_account
-      response: I couldn't match the destination account. Which account should receive the money?
+      response: I couldn't match the destination account. Please provide its account type and last four digits.
+      ambiguous_choice_template: "I found multiple {account_type} accounts. Which account would you like: {choices}?"
   - op: validate
     rule: not_equal
     left: $vars.source.account_id
@@ -114,6 +117,11 @@ steps:
       field: destination_account
       retry_step: 2
       response: The destination must be different from the source. Which account should receive the money?
+  - op: collect
+    fields:
+      - name: amount
+        prompt: How much would you like to transfer?
+    completed_step: collected transfer amount
   - op: validate_decimal
     value: $inputs.amount
     minimum: "0.01"

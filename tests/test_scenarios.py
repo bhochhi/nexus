@@ -42,6 +42,22 @@ class _GapAwareProvider(DeterministicProvider):
         return analysis
 
 
+class _CapabilityGapProvider(DeterministicProvider):
+    """Simulates a model that incorrectly marks capability help as a skill gap."""
+
+    def understand_turn(self, message, catalog, context=None):
+        if "what else" in message.casefold():
+            return TurnAnalysis(
+                goals=[],
+                skill_gap=SkillGap(
+                    objective="learn what services are available",
+                    category="capability_discovery",
+                    confidence=0.96,
+                ),
+            )
+        return super().understand_turn(message, catalog, context)
+
+
 class _DisplayNameGoalProvider(DeterministicProvider):
     """Simulates a semantic model returning a friendly label as the goal ID."""
 
@@ -196,7 +212,7 @@ def test_balance_displays_all_accounts_when_member_has_two_or_fewer(runtime_fact
 def test_transfer_requires_immediate_confirmation(runtime_factory):
     runtime = runtime_factory()
 
-    review = runtime.chat("transfer", "Transfer $50 from checking to savings")
+    review = runtime.chat("transfer", "Transfer $50 from chk-001 to sav-001")
 
     assert "Review mock transfer" in review.text
     assert "yes or no" in review.text
@@ -211,6 +227,56 @@ def test_transfer_requires_immediate_confirmation(runtime_factory):
     audits = runtime.store.audit_events("transfer")
     assert any(event["event_type"] == "policy_approved" for event in audits)
     assert any(event["payload"].get("status") == "completed" for event in audits)
+
+
+def test_account_reference_with_type_and_suffix_prefers_the_specific_account(
+    runtime_factory,
+):
+    runtime = runtime_factory()
+
+    account = runtime.tools.accounts.resolve("checking 1003")
+
+    assert account is not None
+    assert account.account_id == "chk-003"
+
+
+def test_transfer_requires_a_specific_account_when_type_has_multiple_accounts(
+    runtime_factory,
+):
+    runtime = runtime_factory()
+
+    source = runtime.chat("transfer-specific-account", "Transfer $200 from checking to savings")
+    assert "I found multiple checking accounts" in source.text
+
+    destination = runtime.chat("transfer-specific-account", "checking 1003")
+    assert "I found multiple savings accounts" in destination.text
+
+    review = runtime.chat("transfer-specific-account", "savings 2003")
+    assert "Review mock transfer" in review.text
+    assert "Checking ending in 1003" in review.text
+    assert "Savings ending in 2003" in review.text
+
+
+def test_transfer_lists_eligible_accounts_for_an_ambiguous_account_type(
+    runtime_factory,
+):
+    runtime = runtime_factory()
+
+    runtime.chat("transfer-account-choice", "I want to make a transfer")
+    runtime.chat("transfer-account-choice", "savings 2003")
+    choices = runtime.chat("transfer-account-choice", "checking")
+
+    assert "I found multiple checking accounts" in choices.text
+    assert "Checking ending in 1001" in choices.text
+    assert "Checking ending in 1002" in choices.text
+    assert "Checking ending in 1003" in choices.text
+
+    amount = runtime.chat("transfer-account-choice", "1003")
+    assert "How much would you like to transfer" in amount.text
+
+    review = runtime.chat("transfer-account-choice", "$200")
+    assert "Savings ending in 2003" in review.text
+    assert "Checking ending in 1003" in review.text
 
 
 def test_pending_transfer_confirmation_survives_restart(runtime_factory):
@@ -355,6 +421,80 @@ def test_greeting_loads_mock_member_profile_and_explains_capabilities(runtime_fa
     assert state["member_profile"]["preferred_name"] == "Jordan"
     assert state["reception_variant"] in {0, 1, 2}
     assert state["greeted"] is True
+
+
+def test_capability_responses_cycle_controlled_copy_within_a_session(runtime_factory):
+    runtime = runtime_factory()
+
+    first = runtime.chat("reception-variation", "what can you do")
+    second = runtime.chat("reception-variation", "what can you do")
+
+    assert first.text != second.text
+    assert first.text.startswith("Hi Jordan.")
+    assert not second.text.startswith("Hi Jordan.")
+
+
+def test_capability_question_word_order_variant_uses_catalog_response(runtime_factory):
+    runtime = runtime_factory()
+
+    runtime.chat("capability-word-order", "hey")
+    reply = runtime.chat("capability-word-order", "what can else you do?")
+
+    assert "Thanks for explaining" not in reply.text
+    assert "check an account balance" in reply.text
+    assert "make an internal transfer" in reply.text
+
+
+def test_capability_question_with_else_before_can_uses_catalog_response(runtime_factory):
+    runtime = runtime_factory(provider=_CapabilityGapProvider())
+
+    reply = runtime.chat("capability-else-before-can", "what else you can do?")
+
+    assert "don't currently have the ability" not in reply.text
+    assert "Thanks for explaining" not in reply.text
+    assert "check an account balance" in reply.text
+    assert not any(
+        event["event_type"] == "skill_gap"
+        for event in runtime.store.audit_events("capability-else-before-can")
+    )
+
+
+def test_capability_question_does_not_replace_an_active_transfer(runtime_factory):
+    runtime = runtime_factory()
+
+    runtime.chat("capability-during-transfer", "I want to make a transfer")
+    reply = runtime.chat("capability-during-transfer", "what else can you do?")
+
+    assert "check an account balance" in reply.text
+    assert "Which account should the money come from" in reply.text
+    state = runtime.inspect_state("capability-during-transfer")
+    assert state["active_task"]["skill_name"] == "internal_transfer"
+    assert state["active_task"]["inputs"] == {}
+
+
+def test_balance_before_transfer_is_planned_as_two_requests(runtime_factory):
+    runtime = runtime_factory()
+
+    reply = runtime.chat(
+        "balance-before-transfer",
+        "transfer the balance but I want to know how much I have",
+    )
+
+    assert "I'll start by helping you check an account balance" in reply.text
+    assert "Which account type would you like" in reply.text
+    state = runtime.inspect_state("balance-before-transfer")
+    assert state["queued_tasks"][0]["skill_name"] == "internal_transfer"
+
+
+def test_affirmative_answer_to_two_goal_choice_requests_a_specific_choice(runtime_factory):
+    runtime = runtime_factory()
+
+    runtime.chat("clarification-yes", "balance transfer")
+    reply = runtime.chat("clarification-yes", "yes please")
+
+    assert "Please choose one first" in reply.text
+    assert "check an account balance" in reply.text
+    assert "make an internal transfer" in reply.text
 
 
 def test_reception_only_advertises_currently_installed_skills(runtime_factory):
