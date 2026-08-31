@@ -7,7 +7,8 @@ An interactive, development-only code map is available in
 [`docs/graphify-demo.md`](docs/graphify-demo.md) for installation, queries, graph
 refresh instructions, and a short team walkthrough. Graphify is an optional
 Python 3.10+ developer extra installed with `python -m pip install -e
-'.[graphify]'`; it is not an application runtime dependency.
+'.[graphify]'`; the extra includes optional Gemini semantic extraction support
+but is not an application runtime dependency.
 
 ## What is included
 

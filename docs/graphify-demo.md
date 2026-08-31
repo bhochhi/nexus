@@ -65,6 +65,10 @@ Replace `python3.11` with `python3.10`, `python3.12`, or `python3.13` as
 available. No `uv` or `pipx` installation is required. The PyPI package name
 has two trailing `y` characters; the installed command is `graphify`.
 
+The `graphify` project extra includes Graphify's Gemini integration. You do not
+need a Gemini key for the static code-only workflow below. A key is required
+only when you intentionally run semantic extraction with Gemini.
+
 The project-scoped Codex skill and guidance are already checked in under
 `.codex/skills/graphify/` and `AGENTS.md`. Installing the CLI makes those
 instructions and the checked-in `.codex/hooks.json` refresh check operational;
@@ -148,6 +152,53 @@ graphify export callflow-html graphify-out/graph.json \
 
 This creates the graph JSON, interactive HTML, architecture report, and call-flow
 HTML locally without an LLM or API key.
+
+## Add semantic extraction with Gemini
+
+Semantic extraction complements the static AST graph with concepts and
+relationships found in Markdown, architecture documents, PDFs, and images. It
+can also produce descriptive community names. It does not replace the
+structural code extraction.
+
+Install the optional tooling as described above, then put the key in the current
+shell or an approved developer secret manager. Never commit the key:
+
+```bash
+# macOS or Linux
+export GEMINI_API_KEY="replace-with-your-key"
+
+# Verify only that a value is present; do not print the secret.
+test -n "$GEMINI_API_KEY" && echo "Gemini key is configured"
+```
+
+For Windows PowerShell:
+
+```powershell
+$env:GEMINI_API_KEY = "replace-with-your-key"
+if ($env:GEMINI_API_KEY) { Write-Output "Gemini key is configured" }
+```
+
+Build the combined structural and semantic graph from the repository root:
+
+```bash
+graphify extract . --backend gemini --mode deep --out .
+graphify cluster-only . --backend=gemini
+graphify export callflow-html graphify-out/graph.json \
+  --output graphify-out/CALL_FLOW.html
+```
+
+The output filenames are unchanged, but their content is richer:
+
+- `graph.json` includes semantic nodes and provenance-tagged relationships;
+- `graph.html` shows the additional nodes, edges, and named communities;
+- `GRAPH_REPORT.md` includes semantic connections, suggested questions, and
+  token usage; and
+- `CALL_FLOW.html` incorporates the enriched graph when regenerated.
+
+Semantic extraction can send supported repository documents to Gemini and can
+consume billable model tokens. Confirm organizational data-handling policy
+before running it. Treat `INFERRED` and `AMBIGUOUS` relationships as navigation
+hints that require verification in source or authoritative documentation.
 
 ## Query the graph
 
