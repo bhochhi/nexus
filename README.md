@@ -2,6 +2,11 @@
 
 A small, runnable financial-services member-assistance proof of concept built with Python and LangGraph. It demonstrates a stable agent graph, dynamically discovered governed skills, deterministic controls, durable conversation state, and replaceable mock integrations. All members, accounts, transactions, URLs, cases, and knowledge in this repository are synthetic.
 
+An interactive, development-only code map is available in
+[`graphify-out/graph.html`](graphify-out/graph.html). See
+[`docs/graphify-demo.md`](docs/graphify-demo.md) for installation, queries, graph
+refresh instructions, and a short team walkthrough.
+
 ## What is included
 
 - A fixed LangGraph lifecycle for state-aware goal understanding, safe ordering, durable goal/slot clarification, policy checks, generic skill execution, interruption, resumption, confirmation, and confirmed handoff.

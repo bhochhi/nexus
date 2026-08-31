@@ -1,0 +1,2382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>nexus-graphify — Complete Call Flow &amp; Architecture Documentation</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+:root {
+  --bg: #0f172a; --surface: #1e293b; --border: #334155;
+  --text: #e2e8f0; --muted: #94a3b8; --accent: #38bdf8;
+  --warn: #fbbf24; --err: #f87171; --ok: #34d399;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; }
+.container { max-width: 1200px; margin: 0 auto; padding: 40px 24px; }
+h1 { font-size: 2.4rem; margin-bottom: 8px; background: linear-gradient(135deg, var(--accent), #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+h2 { font-size: 1.7rem; margin: 48px 0 16px; padding-bottom: 8px; border-bottom: 2px solid var(--accent); }
+h3 { font-size: 1.25rem; margin: 32px 0 12px; color: var(--accent); }
+h4 { font-size: 1.05rem; margin: 20px 0 8px; color: var(--warn); }
+p { margin: 8px 0; color: var(--muted); }
+.subtitle { color: var(--muted); font-size: 1.1rem; margin-bottom: 32px; }
+.mermaid { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin: 20px 0; overflow-x: auto; position: relative; }
+.mermaid.is-enhanced { padding: 0; overflow: hidden; min-height: 260px; }
+.mermaid-viewport { padding: 54px 24px 24px; overflow: hidden; cursor: grab; touch-action: none; min-height: 260px; }
+.mermaid-viewport.is-dragging { cursor: grabbing; }
+.mermaid-viewport svg { max-width: none !important; height: auto; transform-origin: 0 0; transition: transform 120ms ease; }
+.mermaid-toolbar { position: absolute; top: 10px; right: 10px; z-index: 3; display: flex; align-items: center; gap: 6px; padding: 6px; background: rgba(15,23,42,0.92); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.28); }
+.mermaid-toolbar button, .mermaid-toolbar .zoom-level { height: 28px; min-width: 32px; border: 1px solid var(--border); border-radius: 6px; background: #1e293b; color: var(--text); font: 600 0.78rem system-ui, sans-serif; display: inline-flex; align-items: center; justify-content: center; }
+.mermaid-toolbar button { cursor: pointer; }
+.mermaid-toolbar button:hover { border-color: var(--accent); color: var(--accent); }
+.mermaid-toolbar .zoom-level { min-width: 52px; color: var(--muted); background: transparent; }
+.call-table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.92rem; }
+.call-table th { background: #1a2744; color: var(--accent); text-align: left; padding: 10px 14px; border: 1px solid var(--border); }
+.call-table td { padding: 8px 14px; border: 1px solid var(--border); vertical-align: top; }
+.call-table tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+.tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; }
+.tag-async { background: #7c3aed33; color: #a78bfa; }
+.tag-class { background: #05966933; color: var(--ok); }
+.tag-func { background: #2563eb33; color: var(--accent); }
+.tag-cmd { background: #d9770633; color: var(--warn); }
+.tag-endpoint { background: #dc262633; color: var(--err); }
+.tag-hook { background: #db277733; color: #f472b6; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; margin: 16px 0; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; margin: 16px 0; }
+.arrow-chain { font-family: 'Fira Code', monospace; font-size: 0.85rem; color: var(--accent); padding: 10px; background: rgba(56,189,248,0.06); border-radius: 6px; }
+code { font-family: 'Fira Code', 'Cascadia Code', monospace; background: rgba(255,255,255,0.06); padding: 1px 6px; border-radius: 3px; font-size: 0.88em; }
+ul, ol { margin: 8px 0 8px 24px; color: var(--muted); }
+li { margin: 4px 0; }
+a { color: var(--accent); }
+hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
+.nav { position: sticky; top: 0; background: var(--bg); z-index: 10; padding: 12px 0; border-bottom: 1px solid var(--border); display: flex; gap: 20px; flex-wrap: wrap; font-size: 0.9rem; }
+.nav a { text-decoration: none; }
+.nav a:hover { text-decoration: underline; }
+@media (max-width: 768px) { .container { padding: 16px; } h1 { font-size: 1.8rem; } }
+
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>nexus-graphify — Complete Call Flow &amp; Architecture Documentation</h1>
+<p class="subtitle">Generated from graphify knowledge graph: 740 nodes, 1911 edges, 29 communities. Commit: 2caabf2</p>
+
+<div class="nav">
+    <a href="#overview">Architecture Overview</a>
+    <a href="#build-graph">Graph Build</a>
+    <a href="#cli-skills">CLI &amp; Skill Installers</a>
+    <a href="#ingest-cache-update">Ingestion &amp; Updates</a>
+    <a href="#serve-api">Serving API</a>
+    <a href="#tests-fixtures">Tests &amp; Fixtures</a>
+    <a href="#member-admin-clipy">Member Admin Clipy</a>
+    <a href="#member-assistant-serverpy">Member Assistant Serverpy</a>
+    <a href="#agentic-member-assistant">Agentic Member Assistant</a>
+</div>
+
+<!-- ====== Architecture Overview ====== -->
+<h2 id="overview">1. Architecture Overview</h2>
+
+<div class="mermaid">
+
+%%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
+flowchart LR
+    BUILD_GRAPH_321CBB04("Graph Build<br/><small>80 nodes</small>")
+    class BUILD_GRAPH_321CBB04 module;
+    CLI_SKILLS_9964CBB8("CLI &amp; Skill Installers<br/><small>139 nodes</small>")
+    class CLI_SKILLS_9964CBB8 module;
+    INGEST_CACHE_UPDATE_FF457338("Ingestion &amp; Updates<br/><small>28 nodes</small>")
+    class INGEST_CACHE_UPDATE_FF457338 module;
+    SERVE_API_35EC8E86("Serving API<br/><small>108 nodes</small>")
+    class SERVE_API_35EC8E86 module;
+    TESTS_FIXTURES_B84B1DCC("Tests &amp; Fixtures<br/><small>370 nodes</small>")
+    class TESTS_FIXTURES_B84B1DCC module;
+    MEMBER_ADMIN_CLIPY_5B765C88("Member Admin Clipy<br/><small>7 nodes</small>")
+    class MEMBER_ADMIN_CLIPY_5B765C88 module;
+    MEMBER_ASSISTANT_SERVERPY_DF3FACBC("Member Assistant Serverpy<br/><small>7 nodes</small>")
+    class MEMBER_ASSISTANT_SERVERPY_DF3FACBC module;
+    AGENTIC_MEMBER_ASSISTANT_04FBBCAE("Agentic Member Assistant<br/><small>1 nodes</small>")
+    class AGENTIC_MEMBER_ASSISTANT_04FBBCAE module;
+    TESTS_FIXTURES_B84B1DCC -->|imports x42| SERVE_API_35EC8E86
+    TESTS_FIXTURES_B84B1DCC -->|calls x38| CLI_SKILLS_9964CBB8
+    SERVE_API_35EC8E86 -->|imports x28| TESTS_FIXTURES_B84B1DCC
+    CLI_SKILLS_9964CBB8 -->|uses x28| TESTS_FIXTURES_B84B1DCC
+    BUILD_GRAPH_321CBB04 -->|references x21| SERVE_API_35EC8E86
+    TESTS_FIXTURES_B84B1DCC -->|uses x17| BUILD_GRAPH_321CBB04
+    BUILD_GRAPH_321CBB04 -->|uses x16| TESTS_FIXTURES_B84B1DCC
+    CLI_SKILLS_9964CBB8 -->|imports x14| SERVE_API_35EC8E86
+    SERVE_API_35EC8E86 -->|imports x11| CLI_SKILLS_9964CBB8
+    MEMBER_ADMIN_CLIPY_5B765C88 -->|calls x11| TESTS_FIXTURES_B84B1DCC
+    MEMBER_ADMIN_CLIPY_5B765C88 -->|imports x9| CLI_SKILLS_9964CBB8
+    BUILD_GRAPH_321CBB04 -->|calls x5| CLI_SKILLS_9964CBB8
+    classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
+    classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
+    classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
+    classDef klass fill:#064e3b,stroke:#34d399,color:#d1fae5,stroke-width:1px;
+    classDef ui fill:#831843,stroke:#f472b6,color:#fce7f3,stroke-width:1px;
+    classDef module fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1px;
+    classDef test fill:#3f3f46,stroke:#a1a1aa,color:#f4f4f5,stroke-width:1px;
+    classDef concept fill:#292524,stroke:#a8a29e,color:#fafaf9,stroke-dasharray:4 3;
+    classDef function fill:#0f172a,stroke:#38bdf8,color:#e0f2fe,stroke-width:1px;
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h4>Architecture Layers</h4>
+    <table style="width:100%;font-size:0.85rem;">
+      <tr><th>Layer</th><th>Nodes</th><th>Communities</th></tr>
+      <tr><td>Graph Build</td><td>80</td><td><code>1</code></td></tr><tr><td>CLI &amp; Skill Installers</td><td>139</td><td><code>6, 9, 10, 13, 14, 16, 21, 25</code></td></tr><tr><td>Ingestion &amp; Updates</td><td>28</td><td><code>8</code></td></tr><tr><td>Serving API</td><td>108</td><td><code>0</code></td></tr><tr><td>Tests &amp; Fixtures</td><td>370</td><td><code>2, 3, 4, 5, 7, 11, 12, 15, 17, 18, 22, 23, 24, 26, 27</code></td></tr><tr><td>Member Admin Clipy</td><td>7</td><td><code>19</code></td></tr><tr><td>Member Assistant Serverpy</td><td>7</td><td><code>20</code></td></tr><tr><td>Agentic Member Assistant</td><td>1</td><td><code>28</code></td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h4>Core Flow</h4>
+    <div class="arrow-chain">Ingestion &amp; Updates -&gt; CLI &amp; Skill Installers -&gt; Tests &amp; Fixtures -&gt; Serving API -&gt; Graph Build -&gt; Member Admin Clipy -&gt; Member Assistant Serverpy</div>
+  </div>
+</div>
+<div class="grid">
+  <div class="card">
+    <h4>Graph Report Highlights</h4>
+    <ul>
+      <li>740 nodes · 1911 edges · 29 communities (27 shown, 2 thin omitted)</li>
+      <li>Extraction: 88% EXTRACTED · 12% INFERRED · 0% AMBIGUOUS · INFERRED: 225 edges (avg confidence: 0.9)</li>
+      <li>Token cost: 0 input · 0 output</li>
+      <li>1. `AgentRuntime` - 80 edges</li>
+      <li>2. `runtime_factory()` - 67 edges</li>
+      <li>3. `SQLiteConversationStore` - 46 edges</li>
+    </ul>
+  </div>
+</div>
+<hr>
+<!-- ====== 2. Graph Build ====== -->
+<h2 id="build-graph">2. Graph Build</h2>
+<p>Graph Build groups implementation around member, assistant, runtimepy, modelspy, mostly in src/member_assistant/runtime.py, src/member_assistant/models.py. This section covers 80 nodes and 213 internal edges; the diagram shows only representative relationships to stay readable.</p>
+
+<div class="mermaid">
+%%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
+flowchart LR
+    %% Section: Graph Build (80 nodes, 213 edges)
+    src_member_assistant_runtime_agentruntime_116c75b5("AgentRuntime<br/><small>src/member_assistant/runtime.py</small>")
+    src_member_assistant_runtime_agentruntime_unders_6d914c09("_understand()<br/><small>src/member_assistant/runtime.py</small>")
+    src_member_assistant_runtime_agentruntime_stream_6d186a3b("stream_chat()<br/><small>src/member_assistant/runtime.py</small>")
+    src_member_assistant_runtime_agentruntime_execut_93b0685a("_execute_skill()<br/><small>src/member_assistant/runtime.py</small>")
+    src_member_assistant_runtime_agentruntime_handle_ce141cf1("_handle_confirmation()<br/><small>src/member_assistant/runtime.py</small>")
+    src_member_assistant_runtime_agentruntime_plan_g_cad96de6("_plan_goals()<br/><small>src/member_assistant/runtime.py</small>")
+    src_member_assistant_runtime_agentruntime_record_177a93eb("_record_skill_gap()<br/><small>src/member_assistant/runtime.py</small>")
+    src_member_assistant_runtime_agentruntime_skill_82883ecc("_skill_gap_response()<br/><small>src/member_assistant/runtime.py</small>")
+    src_member_assistant_runtime_agentruntime_respon_0eebdd54("_respond_to_skill_gap()<br/><small>src/member_assistant/runtime.py</small>")
+    src_member_assistant_runtime_agentruntime_supply_9f0d7161("_supply_input()<br/><small>src/member_assistant/runtime.py</small>")
+    src_member_assistant_runtime_agentruntime_handle_12ceac9c("_handle_resume()<br/><small>src/member_assistant/runtime.py</small>")
+    src_member_assistant_runtime_agentruntime_check_c7f2864d("_check_policy()<br/><small>src/member_assistant/runtime.py</small>")
+    src_member_assistant_runtime_agentruntime_advanc_3b05b52d("_advance()<br/><small>src/member_assistant/runtime.py</small>")
+    src_member_assistant_runtime_agentruntime_finali_25492ff3("_finalize()<br/><small>src/member_assistant/runtime.py</small>")
+    src_member_assistant_runtime_agentruntime_skill_6cc223cd("_skill_context()<br/><small>src/member_assistant/runtime.py</small>")
+    src_member_assistant_runtime_agentruntime_task_f_efced5fd("_task_from_goal()<br/><small>src/member_assistant/runtime.py</small>")
+    src_member_assistant_runtime_agentruntime_pause_290a2a98("_pause_current_work()<br/><small>src/member_assistant/runtime.py</small>")
+    src_member_assistant_runtime_agentruntime_normal_6073c5eb("_normalize_input_updates()<br/><small>src/member_assistant/runtime.py</small>")
+    src_member_assistant_runtime_agentruntime_116c75b5 -->|method| src_member_assistant_runtime_agentruntime_record_177a93eb
+    src_member_assistant_runtime_agentruntime_116c75b5 -->|method| src_member_assistant_runtime_agentruntime_skill_82883ecc
+    src_member_assistant_runtime_agentruntime_116c75b5 -->|method| src_member_assistant_runtime_agentruntime_respon_0eebdd54
+    src_member_assistant_runtime_agentruntime_116c75b5 -->|method| src_member_assistant_runtime_agentruntime_plan_g_cad96de6
+    src_member_assistant_runtime_agentruntime_116c75b5 -->|method| src_member_assistant_runtime_agentruntime_stream_6d186a3b
+    src_member_assistant_runtime_agentruntime_116c75b5 -->|method| src_member_assistant_runtime_agentruntime_supply_9f0d7161
+    src_member_assistant_runtime_agentruntime_116c75b5 -->|method| src_member_assistant_runtime_agentruntime_handle_ce141cf1
+    src_member_assistant_runtime_agentruntime_116c75b5 -->|method| src_member_assistant_runtime_agentruntime_handle_12ceac9c
+    src_member_assistant_runtime_agentruntime_116c75b5 -->|method| src_member_assistant_runtime_agentruntime_check_c7f2864d
+    src_member_assistant_runtime_agentruntime_116c75b5 -->|method| src_member_assistant_runtime_agentruntime_execut_93b0685a
+    src_member_assistant_runtime_agentruntime_116c75b5 -->|method| src_member_assistant_runtime_agentruntime_advanc_3b05b52d
+    src_member_assistant_runtime_agentruntime_116c75b5 -->|method| src_member_assistant_runtime_agentruntime_finali_25492ff3
+    src_member_assistant_runtime_agentruntime_116c75b5 -->|method| src_member_assistant_runtime_agentruntime_skill_6cc223cd
+    src_member_assistant_runtime_agentruntime_116c75b5 -->|method| src_member_assistant_runtime_agentruntime_task_f_efced5fd
+    src_member_assistant_runtime_agentruntime_116c75b5 -->|method| src_member_assistant_runtime_agentruntime_pause_290a2a98
+    src_member_assistant_runtime_agentruntime_116c75b5 -->|method| src_member_assistant_runtime_agentruntime_normal_6073c5eb
+    src_member_assistant_runtime_agentruntime_116c75b5 -->|method| src_member_assistant_runtime_agentruntime_unders_6d914c09
+    src_member_assistant_runtime_agentruntime_execut_93b0685a -->|calls| src_member_assistant_runtime_agentruntime_skill_6cc223cd
+    src_member_assistant_runtime_agentruntime_plan_g_cad96de6 -->|calls| src_member_assistant_runtime_agentruntime_pause_290a2a98
+    src_member_assistant_runtime_agentruntime_plan_g_cad96de6 -->|calls| src_member_assistant_runtime_agentruntime_task_f_efced5fd
+    src_member_assistant_runtime_agentruntime_respon_0eebdd54 -->|calls| src_member_assistant_runtime_agentruntime_skill_82883ecc
+    src_member_assistant_runtime_agentruntime_supply_9f0d7161 -->|calls| src_member_assistant_runtime_agentruntime_skill_6cc223cd
+    src_member_assistant_runtime_agentruntime_unders_6d914c09 -->|calls| src_member_assistant_runtime_agentruntime_skill_82883ecc
+    src_member_assistant_runtime_agentruntime_unders_6d914c09 -->|calls| src_member_assistant_runtime_agentruntime_record_177a93eb
+    %% Omitted for readability: 62 nodes, 1 edges
+    class src_member_assistant_runtime_agentruntime_116c75b5 klass;
+    class src_member_assistant_runtime_agentruntime_unders_6d914c09 function;
+    class src_member_assistant_runtime_agentruntime_stream_6d186a3b async;
+    class src_member_assistant_runtime_agentruntime_execut_93b0685a function;
+    class src_member_assistant_runtime_agentruntime_handle_ce141cf1 function;
+    class src_member_assistant_runtime_agentruntime_plan_g_cad96de6 function;
+    class src_member_assistant_runtime_agentruntime_record_177a93eb function;
+    class src_member_assistant_runtime_agentruntime_skill_82883ecc function;
+    class src_member_assistant_runtime_agentruntime_respon_0eebdd54 function;
+    class src_member_assistant_runtime_agentruntime_supply_9f0d7161 function;
+    class src_member_assistant_runtime_agentruntime_handle_12ceac9c function;
+    class src_member_assistant_runtime_agentruntime_check_c7f2864d function;
+    class src_member_assistant_runtime_agentruntime_advanc_3b05b52d function;
+    class src_member_assistant_runtime_agentruntime_finali_25492ff3 function;
+    class src_member_assistant_runtime_agentruntime_skill_6cc223cd function;
+    class src_member_assistant_runtime_agentruntime_task_f_efced5fd function;
+    class src_member_assistant_runtime_agentruntime_pause_290a2a98 function;
+    class src_member_assistant_runtime_agentruntime_normal_6073c5eb function;
+    classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
+    classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
+    classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
+    classDef klass fill:#064e3b,stroke:#34d399,color:#d1fae5,stroke-width:1px;
+    classDef ui fill:#831843,stroke:#f472b6,color:#fce7f3,stroke-width:1px;
+    classDef module fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1px;
+    classDef test fill:#3f3f46,stroke:#a1a1aa,color:#f4f4f5,stroke-width:1px;
+    classDef concept fill:#292524,stroke:#a8a29e,color:#fafaf9,stroke-dasharray:4 3;
+    classDef function fill:#0f172a,stroke:#38bdf8,color:#e0f2fe,stroke-width:1px;
+</div>
+
+<h3>Call Details</h3>
+<table class="call-table">
+<tr>
+  <th style="width:5%">#</th>
+  <th style="width:28%">Node</th>
+  <th style="width:10%">Type</th>
+  <th style="width:17%">Caller</th>
+  <th style="width:20%">Callees</th>
+  <th style="width:20%">Description</th>
+</tr>
+<tr>
+  <td>1</td>
+  <td><code>ConversationState</code><br><small style="color:var(--muted)">src/member_assistant/models.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>AgentRuntime</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>runtime.py</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>SQLiteConversationStore</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small><br>+1 more</td>
+  <td>No direct outbound edge</td>
+  <td>ConversationState node in src/member_assistant/models.py.</td>
+</tr>
+<tr>
+  <td>2</td>
+  <td><code>Message</code><br><small style="color:var(--muted)">src/member_assistant/models.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Message node in src/member_assistant/models.py.</td>
+</tr>
+<tr>
+  <td>3</td>
+  <td><code>PendingClarification</code><br><small style="color:var(--muted)">src/member_assistant/models.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>PendingClarification node in src/member_assistant/models.py.</td>
+</tr>
+<tr>
+  <td>4</td>
+  <td><code>PendingGoalClarification</code><br><small style="color:var(--muted)">src/member_assistant/models.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>PendingGoalClarification node in src/member_assistant/models.py.</td>
+</tr>
+<tr>
+  <td>5</td>
+  <td><code>PendingHandoffOffer</code><br><small style="color:var(--muted)">src/member_assistant/models.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>PendingHandoffOffer node in src/member_assistant/models.py.</td>
+</tr>
+<tr>
+  <td>6</td>
+  <td><code>PendingTaskTransition</code><br><small style="color:var(--muted)">src/member_assistant/models.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>PendingTaskTransition node in src/member_assistant/models.py.</td>
+</tr>
+<tr>
+  <td>7</td>
+  <td><code>TaskState</code><br><small style="color:var(--muted)">src/member_assistant/models.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>AgentRuntime</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>runtime.py</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>TaskState node in src/member_assistant/models.py.</td>
+</tr>
+<tr>
+  <td>8</td>
+  <td><code>WorkflowState</code><br><small style="color:var(--muted)">src/member_assistant/models.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>AgentRuntime</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>runtime.py</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>WorkflowState node in src/member_assistant/models.py.</td>
+</tr>
+<tr>
+  <td>9</td>
+  <td><code>AgentRuntime</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>__getattr__()</code><br><small style="color:var(--muted)">src/member_assistant/__init__.py</small><br><code>__init__.py</code><br><small style="color:var(--muted)">src/member_assistant/__init__.py</small><br><code>create_app()</code><br><small style="color:var(--muted)">src/member_assistant/server.py</small><br>+4 more</td>
+  <td><code>__init__()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>_advance()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>_apply_sentiment()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br>+68 more</td>
+  <td>AgentRuntime node in src/member_assistant/runtime.py.</td>
+</tr>
+<tr>
+  <td>10</td>
+  <td><code>._advance()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>AgentRuntime</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><code>_new_task_transition()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>_task_definition()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td>._advance() node in src/member_assistant/runtime.py.</td>
+</tr>
+<tr>
+  <td>11</td>
+  <td><code>.analyze_live_sentiment()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>AgentRuntime</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><code>_apply_sentiment()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>_session_lock()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>DeterministicProvider</code><br><small style="color:var(--muted)">member_assistant/providers/deterministic.py</small></td>
+  <td>Orchestrates analysis and returns structured documentation data.</td>
+</tr>
+<tr>
+  <td>12</td>
+  <td><code>._apply_sentiment()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_understand()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>AgentRuntime</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>analyze_live_sentiment()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>._apply_sentiment() node in src/member_assistant/runtime.py.</td>
+</tr>
+<tr>
+  <td>13</td>
+  <td><code>._build_graph()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>__init__()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>AgentRuntime</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><code>_traced_node()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td>Builds dependency relationships and graph data.</td>
+</tr>
+<tr>
+  <td>14</td>
+  <td><code>._check_policy()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>AgentRuntime</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><code>_task_definition()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td>._check_policy() node in src/member_assistant/runtime.py.</td>
+</tr>
+<tr>
+  <td>15</td>
+  <td><code>.close()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>AgentRuntime</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.close() node in src/member_assistant/runtime.py.</td>
+</tr>
+<tr>
+  <td>16</td>
+  <td><code>._confirmation_copy()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_handle_confirmation()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>_understand()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>AgentRuntime</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><code>_task_definition()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td>._confirmation_copy() node in src/member_assistant/runtime.py.</td>
+</tr>
+<tr>
+  <td>17</td>
+  <td><code>.end_handoff()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>AgentRuntime</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><code>_session_lock()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>create()</code><br><small style="color:var(--muted)">src/member_assistant/events.py</small></td>
+  <td>.end_handoff() node in src/member_assistant/runtime.py.</td>
+</tr>
+<tr>
+  <td>18</td>
+  <td><code>._ensure_member_profile()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_understand()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>AgentRuntime</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>._ensure_member_profile() node in src/member_assistant/runtime.py.</td>
+</tr>
+<tr>
+  <td>19</td>
+  <td><code>._execute_skill()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>AgentRuntime</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><code>_new_handoff_offer()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>_skill_context()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>_task_definition()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td>._execute_skill() node in src/member_assistant/runtime.py.</td>
+</tr>
+<tr>
+  <td>20</td>
+  <td><code>._finalize()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>AgentRuntime</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>._finalize() node in src/member_assistant/runtime.py.</td>
+</tr>
+<tr>
+  <td>21</td>
+  <td><code>._goal_label()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_member_capability_list()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>_new_task_transition()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>_plan_goals()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br>+2 more</td>
+  <td>No direct outbound edge</td>
+  <td>._goal_label() node in src/member_assistant/runtime.py.</td>
+</tr>
+<tr>
+  <td>22</td>
+  <td><code>._handle_confirmation()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>AgentRuntime</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><code>_confirmation_copy()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>_is_affirmative()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>_is_negative()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td>._handle_confirmation() node in src/member_assistant/runtime.py.</td>
+</tr>
+<tr>
+  <td>23</td>
+  <td><code>._handle_resume()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>AgentRuntime</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><code>_is_affirmative()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td>._handle_resume() node in src/member_assistant/runtime.py.</td>
+</tr>
+<tr>
+  <td>24</td>
+  <td><code>._handoff_goal()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_understand()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>AgentRuntime</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>._handoff_goal() node in src/member_assistant/runtime.py.</td>
+</tr>
+<tr>
+  <td>25</td>
+  <td><code>.handoff_summary()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>AgentRuntime</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.handoff_summary() node in src/member_assistant/runtime.py.</td>
+</tr>
+<tr>
+  <td>26</td>
+  <td><code>._has_explicit_new_goal()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_understand()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>AgentRuntime</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>._has_explicit_new_goal() node in src/member_assistant/runtime.py.</td>
+</tr>
+<tr>
+  <td>27</td>
+  <td><code>.inspect_state()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>AgentRuntime</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.inspect_state() node in src/member_assistant/runtime.py.</td>
+</tr>
+<tr>
+  <td>28</td>
+  <td><code>._is_affirmative()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_handle_confirmation()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>_handle_resume()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>_is_resume_or_discard()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br>+3 more</td>
+  <td>No direct outbound edge</td>
+  <td>._is_affirmative() node in src/member_assistant/runtime.py.</td>
+</tr>
+<tr>
+  <td>29</td>
+  <td><code>._is_explicit_multi_goal()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_route_goal_candidates()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>AgentRuntime</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>._is_explicit_multi_goal() node in src/member_assistant/runtime.py.</td>
+</tr>
+<tr>
+  <td>30</td>
+  <td><code>._is_frustrated()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_understand()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>AgentRuntime</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>._is_frustrated() node in src/member_assistant/runtime.py.</td>
+</tr>
+</table>
+
+<div class="grid">
+  <div class="card">
+    <h4>Key Files</h4>
+    <table style="width:100%;font-size:0.85rem;">
+      <tr><th>File</th><th>Coverage</th></tr>
+      <tr><td><code>src/member_assistant/runtime.py</code></td><td>67 nodes</td></tr>
+<tr><td><code>src/member_assistant/models.py</code></td><td>10 nodes</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h4>Design Notes</h4>
+    <p>This section comes from graphify community clustering. Relationship summary: calls x71, method x57, references x56, explains x10. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
+  </div>
+</div>
+<hr>
+
+<!-- ====== 3. CLI & Skill Installers ====== -->
+<h2 id="cli-skills">3. CLI &amp; Skill Installers</h2>
+<p>CLI &amp; Skill Installers groups implementation around member, assistant, skill, skills, mostly in src/member_assistant/skill_authoring.py, src/member_assistant/catalog.py, member_assistant/skills/declarative.py. This section covers 139 nodes and 356 internal edges; the diagram shows only representative relationships to stay readable.</p>
+
+<div class="mermaid">
+%%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
+flowchart LR
+    %% Section: CLI &amp; Skill Installers (139 nodes, 356 edges)
+    subgraph cli_skills_src_member_assistant_catalog_py_dfe6f1bd["src/member_assistant/catalog.py"]
+        src_member_assistant_catalog_skillcatalog_baad783a("SkillCatalog<br/><small>src/member_assistant/catalog.py</small>")
+        src_member_assistant_catalog_skillcatalog_init_f779299f("__init__()<br/><small>src/member_assistant/catalog.py</small>")
+        src_member_assistant_catalog_skillcatalog_revisi_2be3d2ff("revision()<br/><small>src/member_assistant/catalog.py</small>")
+        src_member_assistant_catalog_skillcatalog_errors_0489153f("errors()<br/><small>src/member_assistant/catalog.py</small>")
+        src_member_assistant_catalog_skillcatalog_get_1fae1915("get()<br/><small>src/member_assistant/catalog.py</small>")
+        src_member_assistant_catalog_skillcatalog_list_c18eae9d("list()<br/><small>src/member_assistant/catalog.py</small>")
+        src_member_assistant_catalog_skillcatalog_routes_e026e7e0("routes()<br/><small>src/member_assistant/catalog.py</small>")
+        src_member_assistant_catalog_skillcatalog_refres_cf472372("refresh()<br/><small>src/member_assistant/catalog.py</small>")
+        src_member_assistant_catalog_skillcatalog_refres_65549ddb("_refresh_index_locked()<br/><small>src/member_assistant/catalog.py</small>")
+        src_member_assistant_catalog_skillcatalog_start_bdfbdb2c("start()<br/><small>src/member_assistant/catalog.py</small>")
+        src_member_assistant_catalog_skillcatalog_stop_643f49f9("stop()<br/><small>src/member_assistant/catalog.py</small>")
+        src_member_assistant_catalog_skillcatalog_watch_e077c748("_watch_loop()<br/><small>src/member_assistant/catalog.py</small>")
+        src_member_assistant_catalog_skillcatalog_instal_54ce9618("install()<br/><small>src/member_assistant/catalog.py</small>")
+    end
+    subgraph cli_skills_member_assistant_skills_declarative_p_7d4f55eb["member_assistant/skills/declarative.py"]
+        src_member_assistant_skills_declarative_declarat_c30c649b("DeclarativeSkillExecutor<br/><small>member_assistant/skills/declarative.py</small>")
+        src_member_assistant_skills_declarative_declarat_3924ea84("execute()<br/><small>member_assistant/skills/declarative.py</small>")
+    end
+    subgraph cli_skills_src_member_assistant_skill_authoring_4f3bfe4c["src/member_assistant/skill_authoring.py"]
+        src_member_assistant_skill_authoring_fileskillpu_5d7caf7e("publish()<br/><small>src/member_assistant/skill_authoring.py</small>")
+        src_member_assistant_skill_authoring_fileskillpu_c1bdb2b9("FileSkillPublisher<br/><small>src/member_assistant/skill_authoring.py</small>")
+    end
+    src_member_assistant_live_support_livesupportbro_1bb21359("LiveSupportBroker<br/><small>src/member_assistant/live_support.py</small>")
+    src_member_assistant_catalog_skillcatalog_baad783a -->|method| src_member_assistant_catalog_skillcatalog_init_f779299f
+    src_member_assistant_catalog_skillcatalog_baad783a -->|method| src_member_assistant_catalog_skillcatalog_revisi_2be3d2ff
+    src_member_assistant_catalog_skillcatalog_baad783a -->|method| src_member_assistant_catalog_skillcatalog_errors_0489153f
+    src_member_assistant_catalog_skillcatalog_baad783a -->|method| src_member_assistant_catalog_skillcatalog_get_1fae1915
+    src_member_assistant_catalog_skillcatalog_baad783a -->|method| src_member_assistant_catalog_skillcatalog_list_c18eae9d
+    src_member_assistant_catalog_skillcatalog_baad783a -->|method| src_member_assistant_catalog_skillcatalog_routes_e026e7e0
+    src_member_assistant_catalog_skillcatalog_baad783a -->|method| src_member_assistant_catalog_skillcatalog_refres_cf472372
+    src_member_assistant_catalog_skillcatalog_baad783a -->|method| src_member_assistant_catalog_skillcatalog_refres_65549ddb
+    src_member_assistant_catalog_skillcatalog_baad783a -->|method| src_member_assistant_catalog_skillcatalog_start_bdfbdb2c
+    src_member_assistant_catalog_skillcatalog_baad783a -->|method| src_member_assistant_catalog_skillcatalog_stop_643f49f9
+    src_member_assistant_catalog_skillcatalog_baad783a -->|method| src_member_assistant_catalog_skillcatalog_watch_e077c748
+    src_member_assistant_catalog_skillcatalog_baad783a -->|method| src_member_assistant_catalog_skillcatalog_instal_54ce9618
+    src_member_assistant_skill_authoring_fileskillpu_c1bdb2b9 -->|method| src_member_assistant_skill_authoring_fileskillpu_5d7caf7e
+    src_member_assistant_skills_declarative_declarat_c30c649b -->|method| src_member_assistant_skills_declarative_declarat_3924ea84
+    src_member_assistant_catalog_skillcatalog_get_1fae1915 -->|calls| src_member_assistant_catalog_skillcatalog_refres_cf472372
+    src_member_assistant_catalog_skillcatalog_init_f779299f -->|calls| src_member_assistant_catalog_skillcatalog_refres_cf472372
+    src_member_assistant_catalog_skillcatalog_instal_54ce9618 -->|calls| src_member_assistant_skill_authoring_fileskillpu_c1bdb2b9
+    src_member_assistant_catalog_skillcatalog_instal_54ce9618 -->|calls| src_member_assistant_catalog_skillcatalog_refres_cf472372
+    src_member_assistant_catalog_skillcatalog_list_c18eae9d -->|calls| src_member_assistant_catalog_skillcatalog_routes_e026e7e0
+    src_member_assistant_catalog_skillcatalog_list_c18eae9d -->|calls| src_member_assistant_catalog_skillcatalog_get_1fae1915
+    src_member_assistant_catalog_skillcatalog_refres_cf472372 -->|calls| src_member_assistant_catalog_skillcatalog_refres_65549ddb
+    src_member_assistant_catalog_skillcatalog_routes_e026e7e0 -->|calls| src_member_assistant_catalog_skillcatalog_refres_cf472372
+    src_member_assistant_catalog_skillcatalog_watch_e077c748 -->|calls| src_member_assistant_catalog_skillcatalog_refres_cf472372
+    src_member_assistant_catalog_skillcatalog_baad783a -->|uses| src_member_assistant_skill_authoring_fileskillpu_c1bdb2b9
+    %% Omitted for readability: 121 nodes, 0 edges
+    class src_member_assistant_catalog_skillcatalog_baad783a klass;
+    class src_member_assistant_catalog_skillcatalog_init_f779299f function;
+    class src_member_assistant_catalog_skillcatalog_revisi_2be3d2ff function;
+    class src_member_assistant_catalog_skillcatalog_errors_0489153f function;
+    class src_member_assistant_catalog_skillcatalog_get_1fae1915 function;
+    class src_member_assistant_catalog_skillcatalog_list_c18eae9d function;
+    class src_member_assistant_catalog_skillcatalog_routes_e026e7e0 api;
+    class src_member_assistant_catalog_skillcatalog_refres_cf472372 function;
+    class src_member_assistant_catalog_skillcatalog_refres_65549ddb function;
+    class src_member_assistant_catalog_skillcatalog_start_bdfbdb2c function;
+    class src_member_assistant_catalog_skillcatalog_stop_643f49f9 function;
+    class src_member_assistant_catalog_skillcatalog_watch_e077c748 function;
+    class src_member_assistant_catalog_skillcatalog_instal_54ce9618 function;
+    class src_member_assistant_skills_declarative_declarat_c30c649b klass;
+    class src_member_assistant_skills_declarative_declarat_3924ea84 function;
+    class src_member_assistant_skill_authoring_fileskillpu_5d7caf7e function;
+    class src_member_assistant_skill_authoring_fileskillpu_c1bdb2b9 klass;
+    class src_member_assistant_live_support_livesupportbro_1bb21359 klass;
+    classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
+    classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
+    classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
+    classDef klass fill:#064e3b,stroke:#34d399,color:#d1fae5,stroke-width:1px;
+    classDef ui fill:#831843,stroke:#f472b6,color:#fce7f3,stroke-width:1px;
+    classDef module fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1px;
+    classDef test fill:#3f3f46,stroke:#a1a1aa,color:#f4f4f5,stroke-width:1px;
+    classDef concept fill:#292524,stroke:#a8a29e,color:#fafaf9,stroke-dasharray:4 3;
+    classDef function fill:#0f172a,stroke:#38bdf8,color:#e0f2fe,stroke-width:1px;
+</div>
+
+<h3>Call Details</h3>
+<table class="call-table">
+<tr>
+  <th style="width:5%">#</th>
+  <th style="width:28%">Node</th>
+  <th style="width:10%">Type</th>
+  <th style="width:17%">Caller</th>
+  <th style="width:20%">Callees</th>
+  <th style="width:20%">Description</th>
+</tr>
+<tr>
+  <td>1</td>
+  <td><code>SkillContext</code><br><small style="color:var(--muted)">member_assistant/skills/base.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>_skill_context()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>declarative.py</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>DeclarativeSkillExecutor</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br>+1 more</td>
+  <td><code>ModelProvider</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small><br><code>Observability</code><br><small style="color:var(--muted)">src/member_assistant/observability.py</small><br><code>SkillDefinition</code><br><small style="color:var(--muted)">src/member_assistant/catalog.py</small></td>
+  <td>SkillContext node in member_assistant/skills/base.py.</td>
+</tr>
+<tr>
+  <td>2</td>
+  <td><code>SkillExecutor</code><br><small style="color:var(--muted)">member_assistant/skills/base.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>declarative.py</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>registry.py</code><br><small style="color:var(--muted)">member_assistant/skills/registry.py</small><br><code>SkillExecutorRegistry</code><br><small style="color:var(--muted)">member_assistant/skills/registry.py</small></td>
+  <td><code>collect_input()</code><br><small style="color:var(--muted)">member_assistant/skills/base.py</small><br><code>execute()</code><br><small style="color:var(--muted)">member_assistant/skills/base.py</small><br><code>required_tools()</code><br><small style="color:var(--muted)">member_assistant/skills/base.py</small><br>+1 more</td>
+  <td>SkillExecutor node in member_assistant/skills/base.py.</td>
+</tr>
+<tr>
+  <td>3</td>
+  <td><code>SkillResult</code><br><small style="color:var(--muted)">member_assistant/skills/base.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>_awaiting_input()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>_configured_failure()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>_confirm()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br>+4 more</td>
+  <td>No direct outbound edge</td>
+  <td>SkillResult node in member_assistant/skills/base.py.</td>
+</tr>
+<tr>
+  <td>4</td>
+  <td><code>DeclarativeSkillExecutor</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>__init__()</code><br><small style="color:var(--muted)">member_assistant/skills/registry.py</small><br><code>registry.py</code><br><small style="color:var(--muted)">member_assistant/skills/registry.py</small><br><code>SkillExecutorRegistry</code><br><small style="color:var(--muted)">member_assistant/skills/registry.py</small></td>
+  <td><code>_append_once()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>_awaiting_input()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>_call_tool()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br>+16 more</td>
+  <td>DeclarativeSkillExecutor node in member_assistant/skills/declarative.py.</td>
+</tr>
+<tr>
+  <td>5</td>
+  <td><code>SkillExecutorRegistry</code><br><small style="color:var(--muted)">member_assistant/skills/registry.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>__init__()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>__init__.py</code><br><small style="color:var(--muted)">member_assistant/skills/__init__.py</small><br><code>runtime.py</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><code>__init__()</code><br><small style="color:var(--muted)">member_assistant/skills/registry.py</small><br><code>DeclarativeSkillExecutor</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>get()</code><br><small style="color:var(--muted)">member_assistant/skills/registry.py</small><br>+2 more</td>
+  <td>SkillExecutorRegistry node in member_assistant/skills/registry.py.</td>
+</tr>
+<tr>
+  <td>6</td>
+  <td><code>.collect_input()</code><br><small style="color:var(--muted)">member_assistant/skills/base.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>SkillExecutor</code><br><small style="color:var(--muted)">member_assistant/skills/base.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.collect_input() node in member_assistant/skills/base.py.</td>
+</tr>
+<tr>
+  <td>7</td>
+  <td><code>.execute()</code><br><small style="color:var(--muted)">member_assistant/skills/base.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>SkillExecutor</code><br><small style="color:var(--muted)">member_assistant/skills/base.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.execute() node in member_assistant/skills/base.py.</td>
+</tr>
+<tr>
+  <td>8</td>
+  <td><code>._append_once()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_complete_step()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>_confirm()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>DeclarativeSkillExecutor</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>._append_once() node in member_assistant/skills/declarative.py.</td>
+</tr>
+<tr>
+  <td>9</td>
+  <td><code>._awaiting_input()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td><span class="tag tag-async">Async</span></td>
+  <td><code>_collect()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>_configured_failure()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>_select()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br>+1 more</td>
+  <td><code>SkillResult</code><br><small style="color:var(--muted)">member_assistant/skills/base.py</small></td>
+  <td>._awaiting_input() node in member_assistant/skills/declarative.py.</td>
+</tr>
+<tr>
+  <td>10</td>
+  <td><code>._call_tool()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>DeclarativeSkillExecutor</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>execute()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td><code>_complete_step()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>_configured_failure()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>_resolve()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td>._call_tool() node in member_assistant/skills/declarative.py.</td>
+</tr>
+<tr>
+  <td>11</td>
+  <td><code>._collect()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>DeclarativeSkillExecutor</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>execute()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td><code>_awaiting_input()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>_complete_step()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td>._collect() node in member_assistant/skills/declarative.py.</td>
+</tr>
+<tr>
+  <td>12</td>
+  <td><code>._complete_step()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_call_tool()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>_collect()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>_confirm()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br>+6 more</td>
+  <td><code>_append_once()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td>._complete_step() node in member_assistant/skills/declarative.py.</td>
+</tr>
+<tr>
+  <td>13</td>
+  <td><code>._configured_failure()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_call_tool()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>_validate()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>_validate_decimal()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br>+1 more</td>
+  <td><code>_awaiting_input()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>SkillResult</code><br><small style="color:var(--muted)">member_assistant/skills/base.py</small></td>
+  <td>Reads, resolves, or persists project configuration.</td>
+</tr>
+<tr>
+  <td>14</td>
+  <td><code>._confirm()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>DeclarativeSkillExecutor</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>execute()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td><code>_append_once()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>_complete_step()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>_render()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br>+1 more</td>
+  <td>._confirm() node in member_assistant/skills/declarative.py.</td>
+</tr>
+<tr>
+  <td>15</td>
+  <td><code>.execute()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>DeclarativeSkillExecutor</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td><code>_call_tool()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>_collect()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>_complete_step()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br>+8 more</td>
+  <td>.execute() node in member_assistant/skills/declarative.py.</td>
+</tr>
+<tr>
+  <td>16</td>
+  <td><code>._lookup()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_resolve()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>DeclarativeSkillExecutor</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>._lookup() node in member_assistant/skills/declarative.py.</td>
+</tr>
+<tr>
+  <td>17</td>
+  <td><code>._matches()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_select()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>DeclarativeSkillExecutor</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>._matches() node in member_assistant/skills/declarative.py.</td>
+</tr>
+<tr>
+  <td>18</td>
+  <td><code>._render()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_confirm()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>DeclarativeSkillExecutor</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td><code>_resolve()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td>._render() node in member_assistant/skills/declarative.py.</td>
+</tr>
+<tr>
+  <td>19</td>
+  <td><code>._resolve()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_call_tool()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>_render()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>_respond()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br>+5 more</td>
+  <td><code>_lookup()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td>._resolve() node in member_assistant/skills/declarative.py.</td>
+</tr>
+<tr>
+  <td>20</td>
+  <td><code>._respond()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>DeclarativeSkillExecutor</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>execute()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td><code>_complete_step()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>_resolve()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>SkillResult</code><br><small style="color:var(--muted)">member_assistant/skills/base.py</small></td>
+  <td>._respond() node in member_assistant/skills/declarative.py.</td>
+</tr>
+<tr>
+  <td>21</td>
+  <td><code>._select()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>DeclarativeSkillExecutor</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>execute()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td><code>_awaiting_input()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>_complete_step()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>_matches()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br>+2 more</td>
+  <td>._select() node in member_assistant/skills/declarative.py.</td>
+</tr>
+<tr>
+  <td>22</td>
+  <td><code>._selection_question()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_select()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>DeclarativeSkillExecutor</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>._selection_question() node in member_assistant/skills/declarative.py.</td>
+</tr>
+<tr>
+  <td>23</td>
+  <td><code>._validate()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>DeclarativeSkillExecutor</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>execute()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td><code>_complete_step()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>_configured_failure()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>_resolve()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td>._validate() node in member_assistant/skills/declarative.py.</td>
+</tr>
+<tr>
+  <td>24</td>
+  <td><code>._validate_decimal()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>DeclarativeSkillExecutor</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>execute()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td><code>_complete_step()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>_configured_failure()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>_resolve()</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td>._validate_decimal() node in member_assistant/skills/declarative.py.</td>
+</tr>
+<tr>
+  <td>25</td>
+  <td><code>.get()</code><br><small style="color:var(--muted)">member_assistant/skills/registry.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>SkillExecutorRegistry</code><br><small style="color:var(--muted)">member_assistant/skills/registry.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.get() node in member_assistant/skills/registry.py.</td>
+</tr>
+<tr>
+  <td>26</td>
+  <td><code>.__init__()</code><br><small style="color:var(--muted)">member_assistant/skills/registry.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>SkillExecutorRegistry</code><br><small style="color:var(--muted)">member_assistant/skills/registry.py</small></td>
+  <td><code>DeclarativeSkillExecutor</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small></td>
+  <td>.__init__() node in member_assistant/skills/registry.py.</td>
+</tr>
+<tr>
+  <td>27</td>
+  <td><code>.supported_archetypes()</code><br><small style="color:var(--muted)">member_assistant/skills/registry.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>SkillExecutorRegistry</code><br><small style="color:var(--muted)">member_assistant/skills/registry.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.supported_archetypes() node in member_assistant/skills/registry.py.</td>
+</tr>
+<tr>
+  <td>28</td>
+  <td><code>skills/base.py</code><br><small style="color:var(--muted)">member_assistant/skills/base.py</small></td>
+  <td><span class="tag tag-class">Module</span></td>
+  <td><code>declarative.py</code><br><small style="color:var(--muted)">member_assistant/skills/declarative.py</small><br><code>registry.py</code><br><small style="color:var(--muted)">member_assistant/skills/registry.py</small><br><code>runtime.py</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><code>__init__.py</code><br><small style="color:var(--muted)">member_assistant/tools/__init__.py</small><br><code>ABC</code><br><code>base.py</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small><br>+6 more</td>
+  <td>Module file in member_assistant/skills/base.py.</td>
+</tr>
+<tr>
+  <td>29</td>
+  <td><code>ABC</code><br><small style="color:var(--muted)"></small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>base.py</code><br><small style="color:var(--muted)">member_assistant/skills/base.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>ABC node in project.</td>
+</tr>
+<tr>
+  <td>30</td>
+  <td><code>Any</code><br><small style="color:var(--muted)"></small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Any node in project.</td>
+</tr>
+</table>
+
+<div class="grid">
+  <div class="card">
+    <h4>Key Files</h4>
+    <table style="width:100%;font-size:0.85rem;">
+      <tr><th>File</th><th>Coverage</th></tr>
+      <tr><td><code>src/member_assistant/skill_authoring.py</code></td><td>34 nodes</td></tr>
+<tr><td><code>src/member_assistant/catalog.py</code></td><td>23 nodes</td></tr>
+<tr><td><code>member_assistant/skills/declarative.py</code></td><td>21 nodes</td></tr>
+<tr><td><code>src/member_assistant/live_support.py</code></td><td>18 nodes</td></tr>
+<tr><td><code>member_assistant/skills/base.py</code></td><td>7 nodes</td></tr>
+<tr><td><code>member_assistant/skills/registry.py</code></td><td>6 nodes</td></tr>
+<tr><td><code>src/member_assistant/skill_cli.py</code></td><td>5 nodes</td></tr>
+<tr><td><code>src/member_assistant/ui_launcher.py</code></td><td>5 nodes</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h4>Design Notes</h4>
+    <p>This section comes from graphify community clustering. Relationship summary: calls x140, references x74, method x71, explains x20. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
+  </div>
+</div>
+<hr>
+
+<!-- ====== 4. Ingestion & Updates ====== -->
+<h2 id="ingest-cache-update">4. Ingestion &amp; Updates</h2>
+<p>Ingestion &amp; Updates groups implementation around member, assistant, uipy, clientpy, mostly in src/member_assistant/ui_client.py, src/member_assistant/msr_ui.py, src/member_assistant/member_ui.py. This section covers 28 nodes and 40 internal edges; the diagram shows only representative relationships to stay readable.</p>
+
+<div class="mermaid">
+%%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
+flowchart LR
+    %% Section: Ingestion &amp; Updates (28 nodes, 40 edges)
+    subgraph ingest_cache_update_src_member_assistant_ui_clie_188bcbc6["src/member_assistant/ui_client.py"]
+        src_member_assistant_ui_client_realtimewebsocket_5bc40720("RealtimeWebSocketClient<br/><small>src/member_assistant/ui_client.py</small>")
+        src_member_assistant_ui_client_realtimewebsocket_9ee04014("__init__()<br/><small>src/member_assistant/ui_client.py</small>")
+        src_member_assistant_ui_client_realtimewebsocket_f4367c20("_run()<br/><small>src/member_assistant/ui_client.py</small>")
+        src_member_assistant_ui_client_realtimewebsocket_2731ffff("send()<br/><small>src/member_assistant/ui_client.py</small>")
+        src_member_assistant_ui_client_realtimewebsocket_c8d9029c("drain()<br/><small>src/member_assistant/ui_client.py</small>")
+        src_member_assistant_ui_client_realtimewebsocket_0cd4d3b5("close()<br/><small>src/member_assistant/ui_client.py</small>")
+        src_member_assistant_ui_client_6f23b85d("ui_client.py")
+    end
+    subgraph ingest_cache_update_src_member_assistant_msr_ui_ca9b2f04["src/member_assistant/msr_ui.py"]
+        src_member_assistant_msr_ui_console_49f881ea("console()<br/><small>src/member_assistant/msr_ui.py</small>")
+        src_member_assistant_msr_ui_963a0de3("msr_ui.py")
+        src_member_assistant_msr_ui_process_187624a8("_process()<br/><small>src/member_assistant/msr_ui.py</small>")
+        src_member_assistant_msr_ui_sentiment_html_09296019("_sentiment_html()<br/><small>src/member_assistant/msr_ui.py</small>")
+        src_member_assistant_msr_ui_reset_f4d71f66("_reset()<br/><small>src/member_assistant/msr_ui.py</small>")
+        src_member_assistant_msr_ui_merge_case_1d414fe4("_merge_case()<br/><small>src/member_assistant/msr_ui.py</small>")
+    end
+    subgraph ingest_cache_update_src_member_assistant_member_84a6d12b["src/member_assistant/member_ui.py"]
+        src_member_assistant_member_ui_conversation_a8de07b2("conversation()<br/><small>src/member_assistant/member_ui.py</small>")
+        src_member_assistant_member_ui_205677f7("member_ui.py")
+        src_member_assistant_member_ui_process_1e9fec2c("_process()<br/><small>src/member_assistant/member_ui.py</small>")
+        src_member_assistant_member_ui_add_message_4f4601f9("_add_message()<br/><small>src/member_assistant/member_ui.py</small>")
+        src_member_assistant_member_ui_reset_3dd1a281("_reset()<br/><small>src/member_assistant/member_ui.py</small>")
+    end
+    src_member_assistant_ui_client_realtimewebsocket_5bc40720 -->|method| src_member_assistant_ui_client_realtimewebsocket_9ee04014
+    src_member_assistant_ui_client_realtimewebsocket_5bc40720 -->|method| src_member_assistant_ui_client_realtimewebsocket_f4367c20
+    src_member_assistant_ui_client_realtimewebsocket_5bc40720 -->|method| src_member_assistant_ui_client_realtimewebsocket_2731ffff
+    src_member_assistant_ui_client_realtimewebsocket_5bc40720 -->|method| src_member_assistant_ui_client_realtimewebsocket_c8d9029c
+    src_member_assistant_ui_client_realtimewebsocket_5bc40720 -->|method| src_member_assistant_ui_client_realtimewebsocket_0cd4d3b5
+    src_member_assistant_member_ui_conversation_a8de07b2 -->|calls| src_member_assistant_member_ui_process_1e9fec2c
+    src_member_assistant_member_ui_conversation_a8de07b2 -->|calls| src_member_assistant_member_ui_add_message_4f4601f9
+    src_member_assistant_member_ui_conversation_a8de07b2 -->|calls| src_member_assistant_member_ui_reset_3dd1a281
+    src_member_assistant_member_ui_process_1e9fec2c -->|calls| src_member_assistant_member_ui_add_message_4f4601f9
+    src_member_assistant_msr_ui_console_49f881ea -->|calls| src_member_assistant_msr_ui_process_187624a8
+    src_member_assistant_msr_ui_console_49f881ea -->|calls| src_member_assistant_msr_ui_sentiment_html_09296019
+    src_member_assistant_msr_ui_console_49f881ea -->|calls| src_member_assistant_msr_ui_reset_f4d71f66
+    src_member_assistant_msr_ui_process_187624a8 -->|calls| src_member_assistant_msr_ui_merge_case_1d414fe4
+    src_member_assistant_member_ui_205677f7 -->|imports| src_member_assistant_ui_client_realtimewebsocket_5bc40720
+    src_member_assistant_member_ui_205677f7 -->|imports| src_member_assistant_ui_client_6f23b85d
+    src_member_assistant_msr_ui_963a0de3 -->|imports| src_member_assistant_ui_client_realtimewebsocket_5bc40720
+    src_member_assistant_msr_ui_963a0de3 -->|imports| src_member_assistant_ui_client_6f23b85d
+    %% Omitted for readability: 10 nodes, 0 edges
+    class src_member_assistant_ui_client_realtimewebsocket_5bc40720 entry;
+    class src_member_assistant_ui_client_realtimewebsocket_9ee04014 function;
+    class src_member_assistant_ui_client_realtimewebsocket_f4367c20 function;
+    class src_member_assistant_ui_client_realtimewebsocket_2731ffff function;
+    class src_member_assistant_ui_client_realtimewebsocket_c8d9029c function;
+    class src_member_assistant_ui_client_realtimewebsocket_0cd4d3b5 function;
+    class src_member_assistant_ui_client_6f23b85d entry;
+    class src_member_assistant_msr_ui_console_49f881ea function;
+    class src_member_assistant_msr_ui_963a0de3 module;
+    class src_member_assistant_msr_ui_process_187624a8 function;
+    class src_member_assistant_msr_ui_sentiment_html_09296019 function;
+    class src_member_assistant_msr_ui_reset_f4d71f66 function;
+    class src_member_assistant_msr_ui_merge_case_1d414fe4 function;
+    class src_member_assistant_member_ui_conversation_a8de07b2 function;
+    class src_member_assistant_member_ui_205677f7 module;
+    class src_member_assistant_member_ui_process_1e9fec2c function;
+    class src_member_assistant_member_ui_add_message_4f4601f9 function;
+    class src_member_assistant_member_ui_reset_3dd1a281 function;
+    classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
+    classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
+    classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
+    classDef klass fill:#064e3b,stroke:#34d399,color:#d1fae5,stroke-width:1px;
+    classDef ui fill:#831843,stroke:#f472b6,color:#fce7f3,stroke-width:1px;
+    classDef module fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1px;
+    classDef test fill:#3f3f46,stroke:#a1a1aa,color:#f4f4f5,stroke-width:1px;
+    classDef concept fill:#292524,stroke:#a8a29e,color:#fafaf9,stroke-dasharray:4 3;
+    classDef function fill:#0f172a,stroke:#38bdf8,color:#e0f2fe,stroke-width:1px;
+</div>
+
+<h3>Call Details</h3>
+<table class="call-table">
+<tr>
+  <th style="width:5%">#</th>
+  <th style="width:28%">Node</th>
+  <th style="width:10%">Type</th>
+  <th style="width:17%">Caller</th>
+  <th style="width:20%">Callees</th>
+  <th style="width:20%">Description</th>
+</tr>
+<tr>
+  <td>1</td>
+  <td><code>RealtimeWebSocketClient</code><br><small style="color:var(--muted)">src/member_assistant/ui_client.py</small></td>
+  <td><span class="tag tag-cmd">Entry</span></td>
+  <td><code>member_ui.py</code><br><small style="color:var(--muted)">src/member_assistant/member_ui.py</small><br><code>msr_ui.py</code><br><small style="color:var(--muted)">src/member_assistant/msr_ui.py</small></td>
+  <td><code>__init__()</code><br><small style="color:var(--muted)">src/member_assistant/ui_client.py</small><br><code>_run()</code><br><small style="color:var(--muted)">src/member_assistant/ui_client.py</small><br><code>close()</code><br><small style="color:var(--muted)">src/member_assistant/ui_client.py</small><br>+2 more</td>
+  <td>RealtimeWebSocketClient node in src/member_assistant/ui_client.py.</td>
+</tr>
+<tr>
+  <td>2</td>
+  <td><code>_add_message()</code><br><small style="color:var(--muted)">src/member_assistant/member_ui.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_process()</code><br><small style="color:var(--muted)">src/member_assistant/member_ui.py</small><br><code>conversation()</code><br><small style="color:var(--muted)">src/member_assistant/member_ui.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>_add_message() node in src/member_assistant/member_ui.py.</td>
+</tr>
+<tr>
+  <td>3</td>
+  <td><code>_base_url()</code><br><small style="color:var(--muted)">src/member_assistant/member_ui.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>_base_url() node in src/member_assistant/member_ui.py.</td>
+</tr>
+<tr>
+  <td>4</td>
+  <td><code>conversation()</code><br><small style="color:var(--muted)">src/member_assistant/member_ui.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>_add_message()</code><br><small style="color:var(--muted)">src/member_assistant/member_ui.py</small><br><code>_process()</code><br><small style="color:var(--muted)">src/member_assistant/member_ui.py</small><br><code>_reset()</code><br><small style="color:var(--muted)">src/member_assistant/member_ui.py</small></td>
+  <td>conversation() node in src/member_assistant/member_ui.py.</td>
+</tr>
+<tr>
+  <td>5</td>
+  <td><code>_process()</code><br><small style="color:var(--muted)">src/member_assistant/member_ui.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>conversation()</code><br><small style="color:var(--muted)">src/member_assistant/member_ui.py</small></td>
+  <td><code>_add_message()</code><br><small style="color:var(--muted)">src/member_assistant/member_ui.py</small></td>
+  <td>_process() node in src/member_assistant/member_ui.py.</td>
+</tr>
+<tr>
+  <td>6</td>
+  <td><code>_reset()</code><br><small style="color:var(--muted)">src/member_assistant/member_ui.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>conversation()</code><br><small style="color:var(--muted)">src/member_assistant/member_ui.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>_reset() node in src/member_assistant/member_ui.py.</td>
+</tr>
+<tr>
+  <td>7</td>
+  <td><code>_base_url()</code><br><small style="color:var(--muted)">src/member_assistant/msr_ui.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>_base_url() node in src/member_assistant/msr_ui.py.</td>
+</tr>
+<tr>
+  <td>8</td>
+  <td><code>console()</code><br><small style="color:var(--muted)">src/member_assistant/msr_ui.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>_process()</code><br><small style="color:var(--muted)">src/member_assistant/msr_ui.py</small><br><code>_reset()</code><br><small style="color:var(--muted)">src/member_assistant/msr_ui.py</small><br><code>_sentiment_html()</code><br><small style="color:var(--muted)">src/member_assistant/msr_ui.py</small></td>
+  <td>console() node in src/member_assistant/msr_ui.py.</td>
+</tr>
+<tr>
+  <td>9</td>
+  <td><code>_merge_case()</code><br><small style="color:var(--muted)">src/member_assistant/msr_ui.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_process()</code><br><small style="color:var(--muted)">src/member_assistant/msr_ui.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>_merge_case() node in src/member_assistant/msr_ui.py.</td>
+</tr>
+<tr>
+  <td>10</td>
+  <td><code>_process()</code><br><small style="color:var(--muted)">src/member_assistant/msr_ui.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>console()</code><br><small style="color:var(--muted)">src/member_assistant/msr_ui.py</small></td>
+  <td><code>_merge_case()</code><br><small style="color:var(--muted)">src/member_assistant/msr_ui.py</small></td>
+  <td>_process() node in src/member_assistant/msr_ui.py.</td>
+</tr>
+<tr>
+  <td>11</td>
+  <td><code>_reset()</code><br><small style="color:var(--muted)">src/member_assistant/msr_ui.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>console()</code><br><small style="color:var(--muted)">src/member_assistant/msr_ui.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>_reset() node in src/member_assistant/msr_ui.py.</td>
+</tr>
+<tr>
+  <td>12</td>
+  <td><code>_sentiment_html()</code><br><small style="color:var(--muted)">src/member_assistant/msr_ui.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>console()</code><br><small style="color:var(--muted)">src/member_assistant/msr_ui.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>Exports documentation data to a target format.</td>
+</tr>
+<tr>
+  <td>13</td>
+  <td><code>.close()</code><br><small style="color:var(--muted)">src/member_assistant/ui_client.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>RealtimeWebSocketClient</code><br><small style="color:var(--muted)">src/member_assistant/ui_client.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.close() node in src/member_assistant/ui_client.py.</td>
+</tr>
+<tr>
+  <td>14</td>
+  <td><code>.drain()</code><br><small style="color:var(--muted)">src/member_assistant/ui_client.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>RealtimeWebSocketClient</code><br><small style="color:var(--muted)">src/member_assistant/ui_client.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.drain() node in src/member_assistant/ui_client.py.</td>
+</tr>
+<tr>
+  <td>15</td>
+  <td><code>.__init__()</code><br><small style="color:var(--muted)">src/member_assistant/ui_client.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>RealtimeWebSocketClient</code><br><small style="color:var(--muted)">src/member_assistant/ui_client.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.__init__() node in src/member_assistant/ui_client.py.</td>
+</tr>
+<tr>
+  <td>16</td>
+  <td><code>._run()</code><br><small style="color:var(--muted)">src/member_assistant/ui_client.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>RealtimeWebSocketClient</code><br><small style="color:var(--muted)">src/member_assistant/ui_client.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>._run() node in src/member_assistant/ui_client.py.</td>
+</tr>
+<tr>
+  <td>17</td>
+  <td><code>.send()</code><br><small style="color:var(--muted)">src/member_assistant/ui_client.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>RealtimeWebSocketClient</code><br><small style="color:var(--muted)">src/member_assistant/ui_client.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.send() node in src/member_assistant/ui_client.py.</td>
+</tr>
+<tr>
+  <td>18</td>
+  <td><code>member_ui.py</code><br><small style="color:var(--muted)">src/member_assistant/member_ui.py</small></td>
+  <td><span class="tag tag-class">Module</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>RealtimeWebSocketClient</code><br><small style="color:var(--muted)">src/member_assistant/ui_client.py</small><br><code>ui_client.py</code><br><small style="color:var(--muted)">src/member_assistant/ui_client.py</small></td>
+  <td>Module file in src/member_assistant/member_ui.py.</td>
+</tr>
+<tr>
+  <td>19</td>
+  <td><code>Any</code><br><small style="color:var(--muted)"></small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Any node in project.</td>
+</tr>
+<tr>
+  <td>20</td>
+  <td><code>fragment</code><br><small style="color:var(--muted)"></small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Supports retrieval-augmented Q&amp;A or streaming chat.</td>
+</tr>
+<tr>
+  <td>21</td>
+  <td><code>msr_ui.py</code><br><small style="color:var(--muted)">src/member_assistant/msr_ui.py</small></td>
+  <td><span class="tag tag-class">Module</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>live_support.py</code><br><small style="color:var(--muted)">src/member_assistant/live_support.py</small><br><code>RealtimeWebSocketClient</code><br><small style="color:var(--muted)">src/member_assistant/ui_client.py</small><br><code>ui_client.py</code><br><small style="color:var(--muted)">src/member_assistant/ui_client.py</small></td>
+  <td>Module file in src/member_assistant/msr_ui.py.</td>
+</tr>
+<tr>
+  <td>22</td>
+  <td><code>Any</code><br><small style="color:var(--muted)"></small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Any node in project.</td>
+</tr>
+<tr>
+  <td>23</td>
+  <td><code>fragment</code><br><small style="color:var(--muted)"></small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Supports retrieval-augmented Q&amp;A or streaming chat.</td>
+</tr>
+<tr>
+  <td>24</td>
+  <td><code>ui_client.py</code><br><small style="color:var(--muted)">src/member_assistant/ui_client.py</small></td>
+  <td><span class="tag tag-cmd">Entry</span></td>
+  <td><code>member_ui.py</code><br><small style="color:var(--muted)">src/member_assistant/member_ui.py</small><br><code>msr_ui.py</code><br><small style="color:var(--muted)">src/member_assistant/msr_ui.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>Module file in src/member_assistant/ui_client.py.</td>
+</tr>
+<tr>
+  <td>25</td>
+  <td><code>Any</code><br><small style="color:var(--muted)"></small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Any node in project.</td>
+</tr>
+<tr>
+  <td>26</td>
+  <td><code>Next-generation Streamlit member chat for the live-support demo.</code><br><small style="color:var(--muted)">src/member_assistant/member_ui.py</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Design note for Next-generation Streamlit member chat for the live-support demo..</td>
+</tr>
+<tr>
+  <td>27</td>
+  <td><code>Streamlit workspace for multi-member live support representatives.</code><br><small style="color:var(--muted)">src/member_assistant/msr_ui.py</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Design note for Streamlit workspace for multi-member live support representatives..</td>
+</tr>
+<tr>
+  <td>28</td>
+  <td><code>Small reconnecting WebSocket client shared by the Streamlit demo apps.</code><br><small style="color:var(--muted)">src/member_assistant/ui_client.py</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Design note for Small reconnecting WebSocket client shared by the Streamlit demo apps..</td>
+</tr>
+</table>
+
+<div class="grid">
+  <div class="card">
+    <h4>Key Files</h4>
+    <table style="width:100%;font-size:0.85rem;">
+      <tr><th>File</th><th>Coverage</th></tr>
+      <tr><td><code>src/member_assistant/msr_ui.py</code></td><td>8 nodes</td></tr>
+<tr><td><code>src/member_assistant/ui_client.py</code></td><td>8 nodes</td></tr>
+<tr><td><code>src/member_assistant/member_ui.py</code></td><td>7 nodes</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h4>Design Notes</h4>
+    <p>This section comes from graphify community clustering. Relationship summary: contains x12, calls x8, references x8, method x5. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
+  </div>
+</div>
+<hr>
+
+<!-- ====== 5. Serving API ====== -->
+<h2 id="serve-api">5. Serving API</h2>
+<p>Serving API groups implementation around member, assistant, providers, providerpy, mostly in member_assistant/providers/base.py, member_assistant/providers/bedrock_provider.py, member_assistant/providers/openai_provider.py. This section covers 108 nodes and 308 internal edges; the diagram shows only representative relationships to stay readable.</p>
+
+<div class="mermaid">
+%%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
+flowchart LR
+    %% Section: Serving API (108 nodes, 308 edges)
+    subgraph serve_api_member_assistant_providers_base_py_e6bdef81["member_assistant/providers/base.py"]
+        src_member_assistant_providers_base_goalmatch_aea5a713("GoalMatch<br/><small>member_assistant/providers/base.py</small>")
+        src_member_assistant_providers_base_goalmatch_as_fe9c2782("as_dict()<br/><small>member_assistant/providers/base.py</small>")
+        src_member_assistant_providers_base_modelprovide_ed1f9a55("ModelProvider<br/><small>member_assistant/providers/base.py</small>")
+        src_member_assistant_providers_base_modelprovide_8c7b8ff1("observability_metadata()<br/><small>member_assistant/providers/base.py</small>")
+        src_member_assistant_providers_base_modelprovide_651c2a72("understand_turn()<br/><small>member_assistant/providers/base.py</small>")
+        src_member_assistant_providers_base_modelprovide_a8823c1a("identify_goals()<br/><small>member_assistant/providers/base.py</small>")
+        src_member_assistant_providers_base_modelprovide_c2f5b5ed("generate_response()<br/><small>member_assistant/providers/base.py</small>")
+        src_member_assistant_providers_base_providererro_761620be("ProviderError<br/><small>member_assistant/providers/base.py</small>")
+        src_member_assistant_providers_base_providererro_f52dd55f("__init__()<br/><small>member_assistant/providers/base.py</small>")
+        src_member_assistant_providers_base_providererro_574f24f8("error_metadata()<br/><small>member_assistant/providers/base.py</small>")
+        src_member_assistant_providers_base_providersafe_3372a35f("ProviderSafetyError<br/><small>member_assistant/providers/base.py</small>")
+        src_member_assistant_providers_base_providersafe_523ba5ae("__init__()<br/><small>member_assistant/providers/base.py</small>")
+    end
+    subgraph serve_api_member_assistant_providers_bedrock_pro_ae358f57["member_assistant/providers/bedrock_provider.py"]
+        src_member_assistant_providers_bedrock_provider_873d91cf("BedrockProvider<br/><small>member_assistant/providers/bedrock_provider.py</small>")
+        src_member_assistant_providers_bedrock_provider_bbc2782b("bedrock_provider.py")
+    end
+    subgraph serve_api_member_assistant_providers_factory_py_bcd5d7fd["member_assistant/providers/factory.py"]
+        src_member_assistant_providers_factory_b6475ac5("factory.py")
+        src_member_assistant_providers_factory_fallbackp_282b3071("FallbackProvider<br/><small>member_assistant/providers/factory.py</small>")
+    end
+    src_member_assistant_providers_deterministic_det_b3a177bf("DeterministicProvider<br/><small>member_assistant/providers/deterministic.py</small>")
+    src_member_assistant_providers_openai_provider_o_af34aef6("OpenAIProvider<br/><small>member_assistant/providers/openai_provider.py</small>")
+    src_member_assistant_providers_base_goalmatch_aea5a713 -->|method| src_member_assistant_providers_base_goalmatch_as_fe9c2782
+    src_member_assistant_providers_base_modelprovide_ed1f9a55 -->|method| src_member_assistant_providers_base_modelprovide_8c7b8ff1
+    src_member_assistant_providers_base_modelprovide_ed1f9a55 -->|method| src_member_assistant_providers_base_modelprovide_651c2a72
+    src_member_assistant_providers_base_modelprovide_ed1f9a55 -->|method| src_member_assistant_providers_base_modelprovide_a8823c1a
+    src_member_assistant_providers_base_modelprovide_ed1f9a55 -->|method| src_member_assistant_providers_base_modelprovide_c2f5b5ed
+    src_member_assistant_providers_base_providererro_761620be -->|method| src_member_assistant_providers_base_providererro_f52dd55f
+    src_member_assistant_providers_base_providererro_761620be -->|method| src_member_assistant_providers_base_providererro_574f24f8
+    src_member_assistant_providers_base_providersafe_3372a35f -->|method| src_member_assistant_providers_base_providersafe_523ba5ae
+    src_member_assistant_providers_base_modelprovide_651c2a72 -->|calls| src_member_assistant_providers_base_modelprovide_a8823c1a
+    src_member_assistant_providers_base_providererro_f52dd55f -->|calls| src_member_assistant_providers_base_providersafe_523ba5ae
+    src_member_assistant_providers_bedrock_provider_bbc2782b -->|imports| src_member_assistant_providers_base_goalmatch_aea5a713
+    src_member_assistant_providers_bedrock_provider_bbc2782b -->|imports| src_member_assistant_providers_base_modelprovide_ed1f9a55
+    src_member_assistant_providers_bedrock_provider_bbc2782b -->|imports| src_member_assistant_providers_base_providererro_761620be
+    src_member_assistant_providers_factory_b6475ac5 -->|imports| src_member_assistant_providers_openai_provider_o_af34aef6
+    src_member_assistant_providers_factory_b6475ac5 -->|imports| src_member_assistant_providers_bedrock_provider_873d91cf
+    src_member_assistant_providers_factory_b6475ac5 -->|imports| src_member_assistant_providers_base_goalmatch_aea5a713
+    src_member_assistant_providers_factory_b6475ac5 -->|imports| src_member_assistant_providers_base_modelprovide_ed1f9a55
+    src_member_assistant_providers_factory_b6475ac5 -->|imports| src_member_assistant_providers_base_providererro_761620be
+    src_member_assistant_providers_factory_b6475ac5 -->|imports| src_member_assistant_providers_deterministic_det_b3a177bf
+    src_member_assistant_providers_bedrock_provider_873d91cf -->|uses| src_member_assistant_providers_base_goalmatch_aea5a713
+    src_member_assistant_providers_bedrock_provider_873d91cf -->|uses| src_member_assistant_providers_base_providererro_761620be
+    src_member_assistant_providers_deterministic_det_b3a177bf -->|uses| src_member_assistant_providers_base_goalmatch_aea5a713
+    src_member_assistant_providers_factory_fallbackp_282b3071 -->|uses| src_member_assistant_providers_base_providererro_761620be
+    src_member_assistant_providers_factory_fallbackp_282b3071 -->|uses| src_member_assistant_providers_base_goalmatch_aea5a713
+    %% Omitted for readability: 90 nodes, 2 edges
+    class src_member_assistant_providers_base_goalmatch_aea5a713 klass;
+    class src_member_assistant_providers_base_goalmatch_as_fe9c2782 function;
+    class src_member_assistant_providers_base_modelprovide_ed1f9a55 klass;
+    class src_member_assistant_providers_base_modelprovide_8c7b8ff1 function;
+    class src_member_assistant_providers_base_modelprovide_651c2a72 function;
+    class src_member_assistant_providers_base_modelprovide_a8823c1a function;
+    class src_member_assistant_providers_base_modelprovide_c2f5b5ed function;
+    class src_member_assistant_providers_base_providererro_761620be klass;
+    class src_member_assistant_providers_base_providererro_f52dd55f function;
+    class src_member_assistant_providers_base_providererro_574f24f8 function;
+    class src_member_assistant_providers_base_providersafe_3372a35f klass;
+    class src_member_assistant_providers_base_providersafe_523ba5ae function;
+    class src_member_assistant_providers_bedrock_provider_873d91cf klass;
+    class src_member_assistant_providers_bedrock_provider_bbc2782b module;
+    class src_member_assistant_providers_factory_b6475ac5 module;
+    class src_member_assistant_providers_factory_fallbackp_282b3071 klass;
+    class src_member_assistant_providers_deterministic_det_b3a177bf klass;
+    class src_member_assistant_providers_openai_provider_o_af34aef6 klass;
+    classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
+    classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
+    classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
+    classDef klass fill:#064e3b,stroke:#34d399,color:#d1fae5,stroke-width:1px;
+    classDef ui fill:#831843,stroke:#f472b6,color:#fce7f3,stroke-width:1px;
+    classDef module fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1px;
+    classDef test fill:#3f3f46,stroke:#a1a1aa,color:#f4f4f5,stroke-width:1px;
+    classDef concept fill:#292524,stroke:#a8a29e,color:#fafaf9,stroke-dasharray:4 3;
+    classDef function fill:#0f172a,stroke:#38bdf8,color:#e0f2fe,stroke-width:1px;
+</div>
+
+<h3>Call Details</h3>
+<table class="call-table">
+<tr>
+  <th style="width:5%">#</th>
+  <th style="width:28%">Node</th>
+  <th style="width:10%">Type</th>
+  <th style="width:17%">Caller</th>
+  <th style="width:20%">Callees</th>
+  <th style="width:20%">Description</th>
+</tr>
+<tr>
+  <td>1</td>
+  <td><code>SkillRoutingDefinition</code><br><small style="color:var(--muted)">src/member_assistant/catalog.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>AgentRuntime</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>base.py</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small><br><code>bedrock_provider.py</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small><br>+15 more</td>
+  <td><code>as_dict()</code><br><small style="color:var(--muted)">src/member_assistant/catalog.py</small><br><code>from_dict()</code><br><small style="color:var(--muted)">src/member_assistant/catalog.py</small></td>
+  <td>SkillRoutingDefinition node in src/member_assistant/catalog.py.</td>
+</tr>
+<tr>
+  <td>2</td>
+  <td><code>GoalMatch</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>__init__.py</code><br><small style="color:var(--muted)">member_assistant/providers/__init__.py</small><br><code>_merge_goal_matches()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>_normalize_goal_dicts()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br>+15 more</td>
+  <td><code>as_dict()</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td>GoalMatch node in member_assistant/providers/base.py.</td>
+</tr>
+<tr>
+  <td>3</td>
+  <td><code>ModelProvider</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>__init__.py</code><br><small style="color:var(--muted)">member_assistant/providers/__init__.py</small><br><code>base.py</code><br><small style="color:var(--muted)">member_assistant/skills/base.py</small><br><code>bedrock_provider.py</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small><br>+6 more</td>
+  <td><code>generate_response()</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small><br><code>identify_goals()</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small><br><code>observability_metadata()</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small><br>+2 more</td>
+  <td>ModelProvider node in member_assistant/providers/base.py.</td>
+</tr>
+<tr>
+  <td>4</td>
+  <td><code>ProviderError</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>__init__()</code><br><small style="color:var(--muted)">member_assistant/providers/openai_provider.py</small><br><code>__init__()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small><br><code>__init__.py</code><br><small style="color:var(--muted)">member_assistant/providers/__init__.py</small><br>+12 more</td>
+  <td><code>__init__()</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small><br><code>error_metadata()</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td>ProviderError node in member_assistant/providers/base.py.</td>
+</tr>
+<tr>
+  <td>5</td>
+  <td><code>ProviderSafetyError</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>__init__.py</code><br><small style="color:var(--muted)">member_assistant/providers/__init__.py</small></td>
+  <td><code>__init__()</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td>ProviderSafetyError node in member_assistant/providers/base.py.</td>
+</tr>
+<tr>
+  <td>6</td>
+  <td><code>SkillGap</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>__init__.py</code><br><small style="color:var(--muted)">member_assistant/providers/__init__.py</small><br><code>_detect_skill_gap()</code><br><small style="color:var(--muted)">member_assistant/providers/deterministic.py</small><br><code>deterministic.py</code><br><small style="color:var(--muted)">member_assistant/providers/deterministic.py</small><br>+6 more</td>
+  <td><code>as_dict()</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td>SkillGap node in member_assistant/providers/base.py.</td>
+</tr>
+<tr>
+  <td>7</td>
+  <td><code>SlotUpdate</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>__init__.py</code><br><small style="color:var(--muted)">member_assistant/providers/__init__.py</small><br><code>_understand()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>deterministic.py</code><br><small style="color:var(--muted)">member_assistant/providers/deterministic.py</small><br>+6 more</td>
+  <td>No direct outbound edge</td>
+  <td>SlotUpdate node in member_assistant/providers/base.py.</td>
+</tr>
+<tr>
+  <td>8</td>
+  <td><code>TurnAnalysis</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>__init__.py</code><br><small style="color:var(--muted)">member_assistant/providers/__init__.py</small><br><code>_converse()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small><br><code>bedrock_provider.py</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small><br>+15 more</td>
+  <td>No direct outbound edge</td>
+  <td>Orchestrates analysis and returns structured documentation data.</td>
+</tr>
+<tr>
+  <td>9</td>
+  <td><code>BedrockProvider</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>an atomic configuration()</code><br><small style="color:var(--muted)">tests/test_bedrock_provider.py</small><br><code>and redacts credentials()</code><br><small style="color:var(--muted)">tests/test_bedrock_provider.py</small><br><code>bedrock from settings()</code><br><small style="color:var(--muted)">tests/test_configuration.py</small><br>+5 more</td>
+  <td><code>__init__()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small><br><code>_base_metadata()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small><br><code>_build_client()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small><br>+13 more</td>
+  <td>BedrockProvider node in member_assistant/providers/bedrock_provider.py.</td>
+</tr>
+<tr>
+  <td>10</td>
+  <td><code>DeterministicProvider</code><br><small style="color:var(--muted)">member_assistant/providers/deterministic.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>__init__.py</code><br><small style="color:var(--muted)">member_assistant/providers/__init__.py</small><br><code>_understand()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>_validate_acceptance()</code><br><small style="color:var(--muted)">src/member_assistant/skill_authoring.py</small><br>+6 more</td>
+  <td><code>__init__()</code><br><small style="color:var(--muted)">member_assistant/providers/deterministic.py</small><br><code>_detect_skill_gap()</code><br><small style="color:var(--muted)">member_assistant/providers/deterministic.py</small><br><code>classify_sentiment()</code><br><small style="color:var(--muted)">member_assistant/providers/deterministic.py</small><br>+10 more</td>
+  <td>DeterministicProvider node in member_assistant/providers/deterministic.py.</td>
+</tr>
+<tr>
+  <td>11</td>
+  <td><code>FallbackProvider</code><br><small style="color:var(--muted)">member_assistant/providers/factory.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>a safety error()</code><br><small style="color:var(--muted)">tests/test_bedrock_provider.py</small><br><code>build_provider()</code><br><small style="color:var(--muted)">member_assistant/providers/factory.py</small></td>
+  <td><code>__init__()</code><br><small style="color:var(--muted)">member_assistant/providers/factory.py</small><br><code>_failure_metadata()</code><br><small style="color:var(--muted)">member_assistant/providers/factory.py</small><br><code>generate_response()</code><br><small style="color:var(--muted)">member_assistant/providers/factory.py</small><br>+7 more</td>
+  <td>FallbackProvider node in member_assistant/providers/factory.py.</td>
+</tr>
+<tr>
+  <td>12</td>
+  <td><code>OpenAIProvider</code><br><small style="color:var(--muted)">member_assistant/providers/openai_provider.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>_provider()</code><br><small style="color:var(--muted)">tests/test_providers.py</small><br><code>build_provider()</code><br><small style="color:var(--muted)">member_assistant/providers/factory.py</small><br><code>factory.py</code><br><small style="color:var(--muted)">member_assistant/providers/factory.py</small></td>
+  <td><code>__init__()</code><br><small style="color:var(--muted)">member_assistant/providers/openai_provider.py</small><br><code>_capture_usage()</code><br><small style="color:var(--muted)">member_assistant/providers/openai_provider.py</small><br><code>_effective_reasoning_effort()</code><br><small style="color:var(--muted)">member_assistant/providers/openai_provider.py</small><br>+11 more</td>
+  <td>OpenAIProvider node in member_assistant/providers/openai_provider.py.</td>
+</tr>
+<tr>
+  <td>13</td>
+  <td><code>.as_dict()</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>GoalMatch</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.as_dict() node in member_assistant/providers/base.py.</td>
+</tr>
+<tr>
+  <td>14</td>
+  <td><code>.generate_response()</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>ModelProvider</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.generate_response() node in member_assistant/providers/base.py.</td>
+</tr>
+<tr>
+  <td>15</td>
+  <td><code>.identify_goals()</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>ModelProvider</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small><br><code>understand_turn()</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.identify_goals() node in member_assistant/providers/base.py.</td>
+</tr>
+<tr>
+  <td>16</td>
+  <td><code>.observability_metadata()</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>ModelProvider</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.observability_metadata() node in member_assistant/providers/base.py.</td>
+</tr>
+<tr>
+  <td>17</td>
+  <td><code>.understand_turn()</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>ModelProvider</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td><code>identify_goals()</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small><br><code>TurnAnalysis</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td>.understand_turn() node in member_assistant/providers/base.py.</td>
+</tr>
+<tr>
+  <td>18</td>
+  <td><code>.error_metadata()</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>ProviderError</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.error_metadata() node in member_assistant/providers/base.py.</td>
+</tr>
+<tr>
+  <td>19</td>
+  <td><code>.__init__()</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>ProviderError</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td><code>__init__()</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td>.__init__() node in member_assistant/providers/base.py.</td>
+</tr>
+<tr>
+  <td>20</td>
+  <td><code>.__init__()</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>__init__()</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small><br><code>ProviderSafetyError</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.__init__() node in member_assistant/providers/base.py.</td>
+</tr>
+<tr>
+  <td>21</td>
+  <td><code>.as_dict()</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>SkillGap</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.as_dict() node in member_assistant/providers/base.py.</td>
+</tr>
+<tr>
+  <td>22</td>
+  <td><code>._base_metadata()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>__init__()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small><br><code>_capture_response()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small><br><code>BedrockProvider</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>._base_metadata() node in member_assistant/providers/bedrock_provider.py.</td>
+</tr>
+<tr>
+  <td>23</td>
+  <td><code>._build_client()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small></td>
+  <td><span class="tag tag-cmd">Entry</span></td>
+  <td><code>__init__()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small><br><code>BedrockProvider</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small></td>
+  <td><code>_safe_provider_error()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small><br><code>ProviderError</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td>._build_client() node in member_assistant/providers/bedrock_provider.py.</td>
+</tr>
+<tr>
+  <td>24</td>
+  <td><code>._capture_response()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_converse()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small><br><code>BedrockProvider</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small></td>
+  <td><code>_base_metadata()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small><br><code>_response_text()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small></td>
+  <td>._capture_response() node in member_assistant/providers/bedrock_provider.py.</td>
+</tr>
+<tr>
+  <td>25</td>
+  <td><code>._converse()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>BedrockProvider</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small><br><code>generate_response()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small><br><code>understand_turn()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small></td>
+  <td><code>_capture_response()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small><br><code>_request_options()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small><br><code>_safe_provider_error()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small><br>+2 more</td>
+  <td>._converse() node in member_assistant/providers/bedrock_provider.py.</td>
+</tr>
+<tr>
+  <td>26</td>
+  <td><code>.generate_response()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>BedrockProvider</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small></td>
+  <td><code>_converse()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small></td>
+  <td>.generate_response() node in member_assistant/providers/bedrock_provider.py.</td>
+</tr>
+<tr>
+  <td>27</td>
+  <td><code>.identify_goals()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>BedrockProvider</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small></td>
+  <td><code>understand_turn()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small></td>
+  <td>.identify_goals() node in member_assistant/providers/bedrock_provider.py.</td>
+</tr>
+<tr>
+  <td>28</td>
+  <td><code>.__init__()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>BedrockProvider</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small></td>
+  <td><code>_base_metadata()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small><br><code>_build_client()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small><br><code>ProviderError</code><br><small style="color:var(--muted)">member_assistant/providers/base.py</small></td>
+  <td>.__init__() node in member_assistant/providers/bedrock_provider.py.</td>
+</tr>
+<tr>
+  <td>29</td>
+  <td><code>.observability_metadata()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>BedrockProvider</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.observability_metadata() node in member_assistant/providers/bedrock_provider.py.</td>
+</tr>
+<tr>
+  <td>30</td>
+  <td><code>._request_options()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_converse()</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small><br><code>BedrockProvider</code><br><small style="color:var(--muted)">member_assistant/providers/bedrock_provider.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>._request_options() node in member_assistant/providers/bedrock_provider.py.</td>
+</tr>
+</table>
+
+<div class="grid">
+  <div class="card">
+    <h4>Key Files</h4>
+    <table style="width:100%;font-size:0.85rem;">
+      <tr><th>File</th><th>Coverage</th></tr>
+      <tr><td><code>member_assistant/providers/base.py</code></td><td>27 nodes</td></tr>
+<tr><td><code>member_assistant/providers/bedrock_provider.py</code></td><td>16 nodes</td></tr>
+<tr><td><code>member_assistant/providers/openai_provider.py</code></td><td>14 nodes</td></tr>
+<tr><td><code>member_assistant/providers/deterministic.py</code></td><td>12 nodes</td></tr>
+<tr><td><code>member_assistant/providers/factory.py</code></td><td>9 nodes</td></tr>
+<tr><td><code>member_assistant/providers/turn_contract.py</code></td><td>8 nodes</td></tr>
+<tr><td><code>src/member_assistant/catalog.py</code></td><td>4 nodes</td></tr>
+<tr><td><code>tests/test_scenarios.py</code></td><td>3 nodes</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h4>Design Notes</h4>
+    <p>This section comes from graphify community clustering. Relationship summary: calls x64, references x62, imports x48, method x45. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
+  </div>
+</div>
+<hr>
+
+<!-- ====== 6. Tests & Fixtures ====== -->
+<h2 id="tests-fixtures">6. Tests &amp; Fixtures</h2>
+<p>Tests &amp; Fixtures groups implementation around member, test, assistant, tests, mostly in src/member_assistant/observability.py, tests/test_scenarios.py, src/member_assistant/state_store.py. This section covers 370 nodes and 730 internal edges; the diagram shows only representative relationships to stay readable.</p>
+
+<div class="mermaid">
+%%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
+flowchart LR
+    %% Section: Tests &amp; Fixtures (370 nodes, 730 edges)
+    subgraph tests_fixtures_src_member_assistant_catalog_py_7b3384dc["src/member_assistant/catalog.py"]
+        src_member_assistant_catalog_skilldefinition_9e62558e("SkillDefinition<br/><small>src/member_assistant/catalog.py</small>")
+        src_member_assistant_catalog_skilldefinition_fro_a187ab1a("from_dict()<br/><small>src/member_assistant/catalog.py</small>")
+        src_member_assistant_catalog_skilldefinition_pub_692f4d9c("public_contract()<br/><small>src/member_assistant/catalog.py</small>")
+        src_member_assistant_catalog_skilldefinition_rou_99e405a7("routing_definition()<br/><small>src/member_assistant/catalog.py</small>")
+    end
+    subgraph tests_fixtures_tests_test_bedrock_provider_py_246ce17f["tests/test_bedrock_provider.py"]
+        tests_test_bedrock_provider_fakebedrockclient_db5e53ce("_FakeBedrockClient<br/><small>tests/test_bedrock_provider.py</small>")
+        tests_test_bedrock_provider_fakebedrockclient_in_b37e3b4c("__init__()<br/><small>tests/test_bedrock_provider.py</small>")
+        tests_test_bedrock_provider_fakebedrockclient_co_2a2492cc("converse()<br/><small>tests/test_bedrock_provider.py</small>")
+    end
+    subgraph tests_fixtures_tests_test_providers_py_92f63e35["tests/test_providers.py"]
+        tests_test_providers_fakeresponses_fcfe3320("_FakeResponses<br/><small>tests/test_providers.py</small>")
+        tests_test_providers_fakeresponses_init_c4e1b563("__init__()<br/><small>tests/test_providers.py</small>")
+        tests_test_providers_fakeresponses_create_75612ee6("create()<br/><small>tests/test_providers.py</small>")
+    end
+    subgraph tests_fixtures_member_assistant_tools_init_py_36b47f3d["member_assistant/tools/__init__.py"]
+        src_member_assistant_tools_init_mocktools_2d5101a1("MockTools<br/><small>member_assistant/tools/__init__.py</small>")
+        src_member_assistant_tools_init_0aff9cd3("__init__.py")
+    end
+    subgraph tests_fixtures_src_member_assistant_policy_py_3ba12f2b["src/member_assistant/policy.py"]
+        src_member_assistant_policy_policyengine_7b54b7fb("PolicyEngine<br/><small>src/member_assistant/policy.py</small>")
+        src_member_assistant_policy_policyengine_evaluat_061ce77f("evaluate()<br/><small>src/member_assistant/policy.py</small>")
+    end
+    src_member_assistant_cli_main_4d576ee0("main()<br/><small>src/member_assistant/cli.py</small>")
+    src_member_assistant_observability_cli_main_6261b756("main()<br/><small>src/member_assistant/observability_cli.py</small>")
+    src_member_assistant_state_store_sqliteconversat_ac6bcb20("SQLiteConversationStore<br/><small>src/member_assistant/state_store.py</small>")
+    tests_test_observability_test_skill_gap_is_visib_47238cdb("structured trace event()<br/><small>tests/test_observability.py</small>")
+    src_member_assistant_catalog_skilldefinition_9e62558e -->|method| src_member_assistant_catalog_skilldefinition_fro_a187ab1a
+    src_member_assistant_catalog_skilldefinition_9e62558e -->|method| src_member_assistant_catalog_skilldefinition_pub_692f4d9c
+    src_member_assistant_catalog_skilldefinition_9e62558e -->|method| src_member_assistant_catalog_skilldefinition_rou_99e405a7
+    src_member_assistant_policy_policyengine_7b54b7fb -->|method| src_member_assistant_policy_policyengine_evaluat_061ce77f
+    tests_test_bedrock_provider_fakebedrockclient_db5e53ce -->|method| tests_test_bedrock_provider_fakebedrockclient_in_b37e3b4c
+    tests_test_bedrock_provider_fakebedrockclient_db5e53ce -->|method| tests_test_bedrock_provider_fakebedrockclient_co_2a2492cc
+    tests_test_providers_fakeresponses_fcfe3320 -->|method| tests_test_providers_fakeresponses_init_c4e1b563
+    tests_test_providers_fakeresponses_fcfe3320 -->|method| tests_test_providers_fakeresponses_create_75612ee6
+    src_member_assistant_policy_policyengine_7b54b7fb -->|uses| src_member_assistant_catalog_skilldefinition_9e62558e
+    %% Omitted for readability: 352 nodes, 0 edges
+    class src_member_assistant_catalog_skilldefinition_9e62558e klass;
+    class src_member_assistant_catalog_skilldefinition_fro_a187ab1a function;
+    class src_member_assistant_catalog_skilldefinition_pub_692f4d9c function;
+    class src_member_assistant_catalog_skilldefinition_rou_99e405a7 function;
+    class tests_test_bedrock_provider_fakebedrockclient_db5e53ce test;
+    class tests_test_bedrock_provider_fakebedrockclient_in_b37e3b4c test;
+    class tests_test_bedrock_provider_fakebedrockclient_co_2a2492cc test;
+    class tests_test_providers_fakeresponses_fcfe3320 test;
+    class tests_test_providers_fakeresponses_init_c4e1b563 test;
+    class tests_test_providers_fakeresponses_create_75612ee6 test;
+    class src_member_assistant_tools_init_mocktools_2d5101a1 klass;
+    class src_member_assistant_tools_init_0aff9cd3 module;
+    class src_member_assistant_policy_policyengine_7b54b7fb klass;
+    class src_member_assistant_policy_policyengine_evaluat_061ce77f function;
+    class src_member_assistant_cli_main_4d576ee0 function;
+    class src_member_assistant_observability_cli_main_6261b756 function;
+    class src_member_assistant_state_store_sqliteconversat_ac6bcb20 ui;
+    class tests_test_observability_test_skill_gap_is_visib_47238cdb test;
+    classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
+    classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
+    classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
+    classDef klass fill:#064e3b,stroke:#34d399,color:#d1fae5,stroke-width:1px;
+    classDef ui fill:#831843,stroke:#f472b6,color:#fce7f3,stroke-width:1px;
+    classDef module fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1px;
+    classDef test fill:#3f3f46,stroke:#a1a1aa,color:#f4f4f5,stroke-width:1px;
+    classDef concept fill:#292524,stroke:#a8a29e,color:#fafaf9,stroke-dasharray:4 3;
+    classDef function fill:#0f172a,stroke:#38bdf8,color:#e0f2fe,stroke-width:1px;
+</div>
+
+<h3>Call Details</h3>
+<table class="call-table">
+<tr>
+  <th style="width:5%">#</th>
+  <th style="width:28%">Node</th>
+  <th style="width:10%">Type</th>
+  <th style="width:17%">Caller</th>
+  <th style="width:20%">Callees</th>
+  <th style="width:20%">Description</th>
+</tr>
+<tr>
+  <td>1</td>
+  <td><code>AssistantEvent</code><br><small style="color:var(--muted)">src/member_assistant/events.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>__getattr__()</code><br><small style="color:var(--muted)">src/member_assistant/__init__.py</small><br><code>__init__.py</code><br><small style="color:var(--muted)">src/member_assistant/__init__.py</small><br><code>_async_events()</code><br><small style="color:var(--muted)">src/member_assistant/server.py</small><br>+6 more</td>
+  <td><code>as_dict()</code><br><small style="color:var(--muted)">src/member_assistant/events.py</small><br><code>create()</code><br><small style="color:var(--muted)">src/member_assistant/events.py</small><br><code>from_dict()</code><br><small style="color:var(--muted)">src/member_assistant/events.py</small></td>
+  <td>AssistantEvent node in src/member_assistant/events.py.</td>
+</tr>
+<tr>
+  <td>2</td>
+  <td><code>AssistantReply</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>__getattr__()</code><br><small style="color:var(--muted)">src/member_assistant/__init__.py</small><br><code>__init__.py</code><br><small style="color:var(--muted)">src/member_assistant/__init__.py</small><br><code>chat()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>AssistantReply node in src/member_assistant/runtime.py.</td>
+</tr>
+<tr>
+  <td>3</td>
+  <td><code>SQLiteConversationStore</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>admin_cli.py</code><br><small style="color:var(--muted)">src/member_assistant/admin_cli.py</small><br><code>AgentRuntime</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>from_settings()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br>+9 more</td>
+  <td><code>__init__()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small><br><code>_cleanup_loop()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small><br><code>_expiry_cutoff()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small><br>+28 more</td>
+  <td>SQLiteConversationStore node in src/member_assistant/state_store.py.</td>
+</tr>
+<tr>
+  <td>4</td>
+  <td><code>_Clock</code><br><small style="color:var(--muted)">tests/test_state_store.py</small></td>
+  <td><span class="tag tag-func">Test</span></td>
+  <td><code>history is retained()</code><br><small style="color:var(--muted)">tests/test_state_store.py</small><br><code>retains audit history()</code><br><small style="color:var(--muted)">tests/test_state_store.py</small><br><code>ttl disables expiration()</code><br><small style="color:var(--muted)">tests/test_state_store.py</small><br>+1 more</td>
+  <td><code>__call__()</code><br><small style="color:var(--muted)">tests/test_state_store.py</small><br><code>__init__()</code><br><small style="color:var(--muted)">tests/test_state_store.py</small><br><code>advance()</code><br><small style="color:var(--muted)">tests/test_state_store.py</small></td>
+  <td>_Clock node in tests/test_state_store.py.</td>
+</tr>
+<tr>
+  <td>5</td>
+  <td><code>.as_dict()</code><br><small style="color:var(--muted)">src/member_assistant/events.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>AssistantEvent</code><br><small style="color:var(--muted)">src/member_assistant/events.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.as_dict() node in src/member_assistant/events.py.</td>
+</tr>
+<tr>
+  <td>6</td>
+  <td><code>.create()</code><br><small style="color:var(--muted)">src/member_assistant/events.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>AssistantEvent</code><br><small style="color:var(--muted)">src/member_assistant/events.py</small><br><code>end_handoff()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>retains audit history()</code><br><small style="color:var(--muted)">tests/test_state_store.py</small><br>+1 more</td>
+  <td>No direct outbound edge</td>
+  <td>.create() node in src/member_assistant/events.py.</td>
+</tr>
+<tr>
+  <td>7</td>
+  <td><code>.from_dict()</code><br><small style="color:var(--muted)">src/member_assistant/events.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>AssistantEvent</code><br><small style="color:var(--muted)">src/member_assistant/events.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.from_dict() node in src/member_assistant/events.py.</td>
+</tr>
+<tr>
+  <td>8</td>
+  <td><code>__getattr__()</code><br><small style="color:var(--muted)">src/member_assistant/__init__.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>AgentRuntime</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>AssistantEvent</code><br><small style="color:var(--muted)">src/member_assistant/events.py</small><br><code>AssistantReply</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td>__getattr__() node in src/member_assistant/__init__.py.</td>
+</tr>
+<tr>
+  <td>9</td>
+  <td><code>new_conversation_state()</code><br><small style="color:var(--muted)">src/member_assistant/models.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>history is retained()</code><br><small style="color:var(--muted)">tests/test_state_store.py</small><br><code>load()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small><br><code>retains audit history()</code><br><small style="color:var(--muted)">tests/test_state_store.py</small><br>+3 more</td>
+  <td>No direct outbound edge</td>
+  <td>new_conversation_state() node in src/member_assistant/models.py.</td>
+</tr>
+<tr>
+  <td>10</td>
+  <td><code>.__init__()</code><br><small style="color:var(--muted)">src/member_assistant/observability.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>LangfuseOtelSink</code><br><small style="color:var(--muted)">src/member_assistant/observability.py</small></td>
+  <td><code>RuntimeError</code></td>
+  <td>.__init__() node in src/member_assistant/observability.py.</td>
+</tr>
+<tr>
+  <td>11</td>
+  <td><code>.chat()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>AgentRuntime</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td><code>AssistantReply</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small><br><code>RuntimeError</code><br><code>stream_chat()</code><br><small style="color:var(--muted)">src/member_assistant/runtime.py</small></td>
+  <td>Supports retrieval-augmented Q&amp;A or streaming chat.</td>
+</tr>
+<tr>
+  <td>12</td>
+  <td><code>.active_live_case()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>SQLiteConversationStore</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><code>_live_case()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td>.active_live_case() node in src/member_assistant/state_store.py.</td>
+</tr>
+<tr>
+  <td>13</td>
+  <td><code>.agent_live_cases()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>SQLiteConversationStore</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><code>_live_case()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td>.agent_live_cases() node in src/member_assistant/state_store.py.</td>
+</tr>
+<tr>
+  <td>14</td>
+  <td><code>.append_audit()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>SQLiteConversationStore</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><code>_now()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td>.append_audit() node in src/member_assistant/state_store.py.</td>
+</tr>
+<tr>
+  <td>15</td>
+  <td><code>.append_event()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>SQLiteConversationStore</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.append_event() node in src/member_assistant/state_store.py.</td>
+</tr>
+<tr>
+  <td>16</td>
+  <td><code>.append_live_message()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>SQLiteConversationStore</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><code>_now()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small><br><code>RuntimeError</code><br><code>ValueError</code></td>
+  <td>.append_live_message() node in src/member_assistant/state_store.py.</td>
+</tr>
+<tr>
+  <td>17</td>
+  <td><code>.assign_live_case()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>SQLiteConversationStore</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><code>_live_case()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small><br><code>_now()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td>.assign_live_case() node in src/member_assistant/state_store.py.</td>
+</tr>
+<tr>
+  <td>18</td>
+  <td><code>.audit_events()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>SQLiteConversationStore</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.audit_events() node in src/member_assistant/state_store.py.</td>
+</tr>
+<tr>
+  <td>19</td>
+  <td><code>.begin_turn()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>SQLiteConversationStore</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><code>_now()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small><br><code>message_digest()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small><br><code>ValueError</code></td>
+  <td>.begin_turn() node in src/member_assistant/state_store.py.</td>
+</tr>
+<tr>
+  <td>20</td>
+  <td><code>.cleanup_expired()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>__init__()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small><br><code>_cleanup_loop()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small><br><code>load()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small><br>+1 more</td>
+  <td><code>_expiry_cutoff()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td>.cleanup_expired() node in src/member_assistant/state_store.py.</td>
+</tr>
+<tr>
+  <td>21</td>
+  <td><code>._cleanup_loop()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>SQLiteConversationStore</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><code>cleanup_expired()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td>._cleanup_loop() node in src/member_assistant/state_store.py.</td>
+</tr>
+<tr>
+  <td>22</td>
+  <td><code>.close()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>SQLiteConversationStore</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.close() node in src/member_assistant/state_store.py.</td>
+</tr>
+<tr>
+  <td>23</td>
+  <td><code>.complete_turn()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>SQLiteConversationStore</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><code>_now()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td>.complete_turn() node in src/member_assistant/state_store.py.</td>
+</tr>
+<tr>
+  <td>24</td>
+  <td><code>.create_live_case()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>SQLiteConversationStore</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><code>_live_case()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small><br><code>_now()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small><br><code>RuntimeError</code></td>
+  <td>.create_live_case() node in src/member_assistant/state_store.py.</td>
+</tr>
+<tr>
+  <td>25</td>
+  <td><code>._expiry_cutoff()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>cleanup_expired()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small><br><code>SQLiteConversationStore</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><code>_now()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td>._expiry_cutoff() node in src/member_assistant/state_store.py.</td>
+</tr>
+<tr>
+  <td>26</td>
+  <td><code>.finish_live_case()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>SQLiteConversationStore</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><code>_live_case()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small><br><code>_now()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small><br><code>ValueError</code></td>
+  <td>.finish_live_case() node in src/member_assistant/state_store.py.</td>
+</tr>
+<tr>
+  <td>27</td>
+  <td><code>.__init__()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>SQLiteConversationStore</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><code>cleanup_expired()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small><br><code>Path</code></td>
+  <td>.__init__() node in src/member_assistant/state_store.py.</td>
+</tr>
+<tr>
+  <td>28</td>
+  <td><code>.inspect()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>SQLiteConversationStore</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><code>load()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td>.inspect() node in src/member_assistant/state_store.py.</td>
+</tr>
+<tr>
+  <td>29</td>
+  <td><code>._live_case()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>active_live_case()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small><br><code>agent_live_cases()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small><br><code>assign_live_case()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small><br>+6 more</td>
+  <td>No direct outbound edge</td>
+  <td>._live_case() node in src/member_assistant/state_store.py.</td>
+</tr>
+<tr>
+  <td>30</td>
+  <td><code>.live_messages()</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>SQLiteConversationStore</code><br><small style="color:var(--muted)">src/member_assistant/state_store.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.live_messages() node in src/member_assistant/state_store.py.</td>
+</tr>
+</table>
+
+<div class="grid">
+  <div class="card">
+    <h4>Key Files</h4>
+    <table style="width:100%;font-size:0.85rem;">
+      <tr><th>File</th><th>Coverage</th></tr>
+      <tr><td><code>src/member_assistant/observability.py</code></td><td>56 nodes</td></tr>
+<tr><td><code>tests/test_scenarios.py</code></td><td>44 nodes</td></tr>
+<tr><td><code>src/member_assistant/state_store.py</code></td><td>37 nodes</td></tr>
+<tr><td><code>tests/test_bedrock_provider.py</code></td><td>11 nodes</td></tr>
+<tr><td><code>tests/test_cli.py</code></td><td>11 nodes</td></tr>
+<tr><td><code>member_assistant/tools/accounts.py</code></td><td>10 nodes</td></tr>
+<tr><td><code>tests/test_providers.py</code></td><td>10 nodes</td></tr>
+<tr><td><code>member_assistant/tools/__init__.py</code></td><td>9 nodes</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h4>Design Notes</h4>
+    <p>This section comes from graphify community clustering. Relationship summary: calls x253, contains x160, method x104, references x81. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
+  </div>
+</div>
+<hr>
+
+<!-- ====== 7. Member Admin Clipy ====== -->
+<h2 id="member-admin-clipy">7. Member Admin Clipy</h2>
+<p>Member Admin Clipy groups implementation around member, admin, clipy, assistant, mostly in src/member_assistant/admin_cli.py. This section covers 7 nodes and 8 internal edges; the diagram shows only representative relationships to stay readable.</p>
+
+<div class="mermaid">
+%%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
+flowchart LR
+    %% Section: Member Admin Clipy (7 nodes, 8 edges)
+    subgraph member_admin_clipy_src_member_assistant_admin_cl_13c3b5c2["src/member_assistant/admin_cli.py"]
+        src_member_assistant_admin_cli_main_59daa8c7("main()<br/><small>src/member_assistant/admin_cli.py</small>")
+        src_member_assistant_admin_cli_parser_35838513("_parser()<br/><small>src/member_assistant/admin_cli.py</small>")
+        src_member_assistant_admin_cli_trace_settings_59e681ac("_trace_settings()<br/><small>src/member_assistant/admin_cli.py</small>")
+        src_member_assistant_admin_cli_b1e0bc74("admin_cli.py")
+        src_member_assistant_admin_cli_rationale_1_f6552626("Local system operations kept separate f...<br/><small>src/member_assistant/admin_cli.py</small>")
+    end
+    subgraph member_admin_clipy_External_generated_348dcd1b["External / generated"]
+        src_member_assistant_admin_cli_py_any_16e96e71("Any")
+        src_member_assistant_admin_cli_py_argumentparser_3aeba8ee("ArgumentParser")
+    end
+    src_member_assistant_admin_cli_main_59daa8c7 -->|calls| src_member_assistant_admin_cli_parser_35838513
+    src_member_assistant_admin_cli_main_59daa8c7 -->|calls| src_member_assistant_admin_cli_trace_settings_59e681ac
+    class src_member_assistant_admin_cli_main_59daa8c7 function;
+    class src_member_assistant_admin_cli_parser_35838513 function;
+    class src_member_assistant_admin_cli_trace_settings_59e681ac function;
+    class src_member_assistant_admin_cli_b1e0bc74 entry;
+    class src_member_assistant_admin_cli_rationale_1_f6552626 concept;
+    class src_member_assistant_admin_cli_py_any_16e96e71 klass;
+    class src_member_assistant_admin_cli_py_argumentparser_3aeba8ee klass;
+    classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
+    classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
+    classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
+    classDef klass fill:#064e3b,stroke:#34d399,color:#d1fae5,stroke-width:1px;
+    classDef ui fill:#831843,stroke:#f472b6,color:#fce7f3,stroke-width:1px;
+    classDef module fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1px;
+    classDef test fill:#3f3f46,stroke:#a1a1aa,color:#f4f4f5,stroke-width:1px;
+    classDef concept fill:#292524,stroke:#a8a29e,color:#fafaf9,stroke-dasharray:4 3;
+    classDef function fill:#0f172a,stroke:#38bdf8,color:#e0f2fe,stroke-width:1px;
+</div>
+
+<h3>Call Details</h3>
+<table class="call-table">
+<tr>
+  <th style="width:5%">#</th>
+  <th style="width:28%">Node</th>
+  <th style="width:10%">Type</th>
+  <th style="width:17%">Caller</th>
+  <th style="width:20%">Callees</th>
+  <th style="width:20%">Description</th>
+</tr>
+<tr>
+  <td>1</td>
+  <td><code>main()</code><br><small style="color:var(--muted)">src/member_assistant/admin_cli.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>_parser()</code><br><small style="color:var(--muted)">src/member_assistant/admin_cli.py</small><br><code>_trace_settings()</code><br><small style="color:var(--muted)">src/member_assistant/admin_cli.py</small><br><code>CatalogValidationError</code><br><small style="color:var(--muted)">src/member_assistant/catalog.py</small><br>+7 more</td>
+  <td>main() node in src/member_assistant/admin_cli.py.</td>
+</tr>
+<tr>
+  <td>2</td>
+  <td><code>_parser()</code><br><small style="color:var(--muted)">src/member_assistant/admin_cli.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>main()</code><br><small style="color:var(--muted)">src/member_assistant/admin_cli.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>_parser() node in src/member_assistant/admin_cli.py.</td>
+</tr>
+<tr>
+  <td>3</td>
+  <td><code>_trace_settings()</code><br><small style="color:var(--muted)">src/member_assistant/admin_cli.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>main()</code><br><small style="color:var(--muted)">src/member_assistant/admin_cli.py</small></td>
+  <td><code>Settings</code><br><small style="color:var(--muted)">src/member_assistant/config.py</small></td>
+  <td>_trace_settings() node in src/member_assistant/admin_cli.py.</td>
+</tr>
+<tr>
+  <td>4</td>
+  <td><code>admin_cli.py</code><br><small style="color:var(--muted)">src/member_assistant/admin_cli.py</small></td>
+  <td><span class="tag tag-cmd">Entry</span></td>
+  <td><code>test_cli.py</code><br><small style="color:var(--muted)">tests/test_cli.py</small></td>
+  <td><code>__init__.py</code><br><small style="color:var(--muted)">member_assistant/tools/__init__.py</small><br><code>catalog.py</code><br><small style="color:var(--muted)">src/member_assistant/catalog.py</small><br><code>CatalogValidationError</code><br><small style="color:var(--muted)">src/member_assistant/catalog.py</small><br>+9 more</td>
+  <td>Module file in src/member_assistant/admin_cli.py.</td>
+</tr>
+<tr>
+  <td>5</td>
+  <td><code>Any</code><br><small style="color:var(--muted)"></small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Any node in project.</td>
+</tr>
+<tr>
+  <td>6</td>
+  <td><code>ArgumentParser</code><br><small style="color:var(--muted)"></small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>ArgumentParser node in project.</td>
+</tr>
+<tr>
+  <td>7</td>
+  <td><code>Local system operations kept separate from the member chat client.</code><br><small style="color:var(--muted)">src/member_assistant/admin_cli.py</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Design note for Local system operations kept separate from the member chat client..</td>
+</tr>
+</table>
+
+<div class="grid">
+  <div class="card">
+    <h4>Key Files</h4>
+    <table style="width:100%;font-size:0.85rem;">
+      <tr><th>File</th><th>Coverage</th></tr>
+      <tr><td><code>src/member_assistant/admin_cli.py</code></td><td>5 nodes</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h4>Design Notes</h4>
+    <p>This section comes from graphify community clustering. Relationship summary: contains x3, calls x2, references x2, explains x1. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
+  </div>
+</div>
+<hr>
+
+<!-- ====== 8. Member Assistant Serverpy ====== -->
+<h2 id="member-assistant-serverpy">8. Member Assistant Serverpy</h2>
+<p>Member Assistant Serverpy groups implementation around member, assistant, serverpy, sessioneventhub, mostly in src/member_assistant/server.py. This section covers 7 nodes and 6 internal edges; the diagram shows only representative relationships to stay readable.</p>
+
+<div class="mermaid">
+%%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
+flowchart LR
+    %% Section: Member Assistant Serverpy (7 nodes, 6 edges)
+    subgraph member_assistant_serverpy_src_member_assistant_s_057b881d["src/member_assistant/server.py"]
+        src_member_assistant_server_sessioneventhub_c85d44c1("SessionEventHub<br/><small>src/member_assistant/server.py</small>")
+        src_member_assistant_server_sessioneventhub_init_9ba7774c("__init__()<br/><small>src/member_assistant/server.py</small>")
+        src_member_assistant_server_sessioneventhub_subs_c2051d69("subscribe()<br/><small>src/member_assistant/server.py</small>")
+        src_member_assistant_server_sessioneventhub_unsu_de3f62e1("unsubscribe()<br/><small>src/member_assistant/server.py</small>")
+        src_member_assistant_server_sessioneventhub_publ_b97b0351("publish()<br/><small>src/member_assistant/server.py</small>")
+        src_member_assistant_server_rationale_25_0c28730e("In-process fan-out for every socket wat...<br/><small>src/member_assistant/server.py</small>")
+    end
+    src_member_assistant_server_py_any_003e7360("Any")
+    src_member_assistant_server_sessioneventhub_c85d44c1 -->|method| src_member_assistant_server_sessioneventhub_init_9ba7774c
+    src_member_assistant_server_sessioneventhub_c85d44c1 -->|method| src_member_assistant_server_sessioneventhub_subs_c2051d69
+    src_member_assistant_server_sessioneventhub_c85d44c1 -->|method| src_member_assistant_server_sessioneventhub_unsu_de3f62e1
+    src_member_assistant_server_sessioneventhub_c85d44c1 -->|method| src_member_assistant_server_sessioneventhub_publ_b97b0351
+    class src_member_assistant_server_sessioneventhub_c85d44c1 klass;
+    class src_member_assistant_server_sessioneventhub_init_9ba7774c function;
+    class src_member_assistant_server_sessioneventhub_subs_c2051d69 function;
+    class src_member_assistant_server_sessioneventhub_unsu_de3f62e1 function;
+    class src_member_assistant_server_sessioneventhub_publ_b97b0351 function;
+    class src_member_assistant_server_rationale_25_0c28730e concept;
+    class src_member_assistant_server_py_any_003e7360 klass;
+    classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
+    classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
+    classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
+    classDef klass fill:#064e3b,stroke:#34d399,color:#d1fae5,stroke-width:1px;
+    classDef ui fill:#831843,stroke:#f472b6,color:#fce7f3,stroke-width:1px;
+    classDef module fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1px;
+    classDef test fill:#3f3f46,stroke:#a1a1aa,color:#f4f4f5,stroke-width:1px;
+    classDef concept fill:#292524,stroke:#a8a29e,color:#fafaf9,stroke-dasharray:4 3;
+    classDef function fill:#0f172a,stroke:#38bdf8,color:#e0f2fe,stroke-width:1px;
+</div>
+
+<h3>Call Details</h3>
+<table class="call-table">
+<tr>
+  <th style="width:5%">#</th>
+  <th style="width:28%">Node</th>
+  <th style="width:10%">Type</th>
+  <th style="width:17%">Caller</th>
+  <th style="width:20%">Callees</th>
+  <th style="width:20%">Description</th>
+</tr>
+<tr>
+  <td>1</td>
+  <td><code>SessionEventHub</code><br><small style="color:var(--muted)">src/member_assistant/server.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>create_app()</code><br><small style="color:var(--muted)">src/member_assistant/server.py</small></td>
+  <td><code>__init__()</code><br><small style="color:var(--muted)">src/member_assistant/server.py</small><br><code>publish()</code><br><small style="color:var(--muted)">src/member_assistant/server.py</small><br><code>subscribe()</code><br><small style="color:var(--muted)">src/member_assistant/server.py</small><br>+1 more</td>
+  <td>SessionEventHub node in src/member_assistant/server.py.</td>
+</tr>
+<tr>
+  <td>2</td>
+  <td><code>.__init__()</code><br><small style="color:var(--muted)">src/member_assistant/server.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>SessionEventHub</code><br><small style="color:var(--muted)">src/member_assistant/server.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.__init__() node in src/member_assistant/server.py.</td>
+</tr>
+<tr>
+  <td>3</td>
+  <td><code>.publish()</code><br><small style="color:var(--muted)">src/member_assistant/server.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>SessionEventHub</code><br><small style="color:var(--muted)">src/member_assistant/server.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.publish() node in src/member_assistant/server.py.</td>
+</tr>
+<tr>
+  <td>4</td>
+  <td><code>.subscribe()</code><br><small style="color:var(--muted)">src/member_assistant/server.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>SessionEventHub</code><br><small style="color:var(--muted)">src/member_assistant/server.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.subscribe() node in src/member_assistant/server.py.</td>
+</tr>
+<tr>
+  <td>5</td>
+  <td><code>.unsubscribe()</code><br><small style="color:var(--muted)">src/member_assistant/server.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>SessionEventHub</code><br><small style="color:var(--muted)">src/member_assistant/server.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.unsubscribe() node in src/member_assistant/server.py.</td>
+</tr>
+<tr>
+  <td>6</td>
+  <td><code>Any</code><br><small style="color:var(--muted)"></small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Any node in project.</td>
+</tr>
+<tr>
+  <td>7</td>
+  <td><code>In-process fan-out for every socket watching the same session. Durable SQLite…</code><br><small style="color:var(--muted)">src/member_assistant/server.py</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Design note for In-process fan-out for every socket watching the same session. Durable SQLite….</td>
+</tr>
+</table>
+
+<div class="grid">
+  <div class="card">
+    <h4>Key Files</h4>
+    <table style="width:100%;font-size:0.85rem;">
+      <tr><th>File</th><th>Coverage</th></tr>
+      <tr><td><code>src/member_assistant/server.py</code></td><td>6 nodes</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h4>Design Notes</h4>
+    <p>This section comes from graphify community clustering. Relationship summary: method x4, references x1, explains x1. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
+  </div>
+</div>
+<hr>
+
+<!-- ====== 9. Agentic Member Assistant ====== -->
+<h2 id="agentic-member-assistant">9. Agentic Member Assistant</h2>
+<p>Agentic Member Assistant groups implementation around agentic, member, assistant, pyprojecttoml, mostly in pyproject.toml. This section covers 1 nodes and 0 internal edges; the diagram shows only representative relationships to stay readable.</p>
+
+<div class="mermaid">
+%%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
+flowchart LR
+    %% Section: Agentic Member Assistant (1 nodes, 0 edges)
+    pkg_agentic_member_assistant_0572daf8("agentic-member-assistant<br/><small>pyproject.toml</small>")
+    class pkg_agentic_member_assistant_0572daf8 module;
+    classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
+    classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
+    classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
+    classDef klass fill:#064e3b,stroke:#34d399,color:#d1fae5,stroke-width:1px;
+    classDef ui fill:#831843,stroke:#f472b6,color:#fce7f3,stroke-width:1px;
+    classDef module fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1px;
+    classDef test fill:#3f3f46,stroke:#a1a1aa,color:#f4f4f5,stroke-width:1px;
+    classDef concept fill:#292524,stroke:#a8a29e,color:#fafaf9,stroke-dasharray:4 3;
+    classDef function fill:#0f172a,stroke:#38bdf8,color:#e0f2fe,stroke-width:1px;
+</div>
+
+<h3>Call Details</h3>
+<table class="call-table">
+<tr>
+  <th style="width:5%">#</th>
+  <th style="width:28%">Node</th>
+  <th style="width:10%">Type</th>
+  <th style="width:17%">Caller</th>
+  <th style="width:20%">Callees</th>
+  <th style="width:20%">Description</th>
+</tr>
+<tr>
+  <td>1</td>
+  <td><code>agentic-member-assistant</code><br><small style="color:var(--muted)">pyproject.toml</small></td>
+  <td><span class="tag tag-class">Module</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>agentic-member-assistant node in pyproject.toml.</td>
+</tr>
+</table>
+
+<div class="grid">
+  <div class="card">
+    <h4>Key Files</h4>
+    <table style="width:100%;font-size:0.85rem;">
+      <tr><th>File</th><th>Coverage</th></tr>
+      <tr><td><code>pyproject.toml</code></td><td>1 nodes</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h4>Design Notes</h4>
+    <p>This section comes from graphify community clustering. Relationship summary: No high-confidence call edges detected. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
+  </div>
+</div>
+<hr>
+
+<h2 id="stats">Project Statistics</h2>
+
+<div class="grid">
+  <div class="card">
+    <h4>Graph</h4>
+    <table style="width:100%;font-size:0.85rem;">
+      <tr><td>Nodes</td><td>740</td></tr>
+      <tr><td>Edges</td><td>1911</td></tr>
+      <tr><td>Hyperedges</td><td>0</td></tr>
+      <tr><td>Communities</td><td>29</td></tr>
+      <tr><td>Documented Sections</td><td>8</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h4>Edge Confidence</h4>
+    <table style="width:100%;font-size:0.85rem;">
+      <tr><td>EXTRACTED</td><td>1686</td></tr>
+      <tr><td>INFERRED</td><td>225</td></tr>
+      <tr><td>AMBIGUOUS</td><td>0</td></tr>
+    </table>
+  </div>
+</div>
+
+<div style="text-align:center; padding:40px 0; color: var(--muted); font-size:0.9rem;">
+  <p>nexus-graphify — Architecture Documentation</p>
+  <p>Generated: 2026-08-31 17:38 UTC · graphify callflow-html</p>
+</div>
+
+</div><!-- .container -->
+
+<script>
+(function () {
+  const mermaidConfig = {
+    startOnLoad: false,
+    theme: 'dark',
+    securityLevel: 'loose',
+    flowchart: { htmlLabels: true, useMaxWidth: true },
+    themeVariables: {
+      primaryColor: '#1e293b',
+      primaryTextColor: '#e2e8f0',
+      primaryBorderColor: '#38bdf8',
+      secondaryColor: '#0f172a',
+      tertiaryColor: '#334155',
+      lineColor: '#64748b',
+      textColor: '#e2e8f0',
+    }
+  };
+
+  mermaid.initialize(mermaidConfig);
+
+  function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+  }
+
+  function enhanceMermaidDiagrams() {
+    document.querySelectorAll('.mermaid').forEach((container) => {
+      if (container.dataset.zoomReady === 'true') return;
+      const svg = container.querySelector('svg');
+      if (!svg) return;
+
+      container.dataset.zoomReady = 'true';
+      container.classList.add('is-enhanced');
+
+      const viewport = document.createElement('div');
+      viewport.className = 'mermaid-viewport';
+      svg.parentNode.insertBefore(viewport, svg);
+      viewport.appendChild(svg);
+
+      const toolbar = document.createElement('div');
+      toolbar.className = 'mermaid-toolbar';
+      toolbar.innerHTML = [
+        '<button type="button" data-action="zoom-out" title="Zoom out">-</button>',
+        '<span class="zoom-level" data-role="level">100%</span>',
+        '<button type="button" data-action="zoom-in" title="Zoom in">+</button>',
+        '<button type="button" data-action="fit" title="Fit width">Fit</button>',
+        '<button type="button" data-action="reset" title="Reset view">Reset</button>'
+      ].join('');
+      container.insertBefore(toolbar, viewport);
+
+      const state = { scale: 1, x: 0, y: 0, dragging: false, startX: 0, startY: 0, originX: 0, originY: 0 };
+      const level = toolbar.querySelector('[data-role="level"]');
+
+      function applyTransform() {
+        svg.style.transform = `translate(${state.x}px, ${state.y}px) scale(${state.scale})`;
+        level.textContent = `${Math.round(state.scale * 100)}%`;
+      }
+
+      function zoomBy(delta) {
+        state.scale = clamp(state.scale + delta, 0.25, 3);
+        applyTransform();
+      }
+
+      function reset() {
+        state.scale = 1;
+        state.x = 0;
+        state.y = 0;
+        applyTransform();
+      }
+
+      function fitWidth() {
+        const rawWidth = svg.viewBox && svg.viewBox.baseVal && svg.viewBox.baseVal.width
+          ? svg.viewBox.baseVal.width
+          : svg.getBoundingClientRect().width / state.scale;
+        if (!rawWidth) {
+          reset();
+          return;
+        }
+        state.scale = clamp((viewport.clientWidth - 48) / rawWidth, 0.25, 1.4);
+        state.x = 0;
+        state.y = 0;
+        applyTransform();
+      }
+
+      toolbar.addEventListener('click', (event) => {
+        const button = event.target.closest('button[data-action]');
+        if (!button) return;
+        const action = button.dataset.action;
+        if (action === 'zoom-in') zoomBy(0.15);
+        if (action === 'zoom-out') zoomBy(-0.15);
+        if (action === 'fit') fitWidth();
+        if (action === 'reset') reset();
+      });
+
+      viewport.addEventListener('wheel', (event) => {
+        if (!event.ctrlKey && !event.metaKey) return;
+        event.preventDefault();
+        zoomBy(event.deltaY < 0 ? 0.1 : -0.1);
+      }, { passive: false });
+
+      viewport.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0) return;
+        state.dragging = true;
+        state.startX = event.clientX;
+        state.startY = event.clientY;
+        state.originX = state.x;
+        state.originY = state.y;
+        viewport.classList.add('is-dragging');
+        viewport.setPointerCapture(event.pointerId);
+      });
+
+      viewport.addEventListener('pointermove', (event) => {
+        if (!state.dragging) return;
+        state.x = state.originX + event.clientX - state.startX;
+        state.y = state.originY + event.clientY - state.startY;
+        applyTransform();
+      });
+
+      function endDrag(event) {
+        if (!state.dragging) return;
+        state.dragging = false;
+        viewport.classList.remove('is-dragging');
+        if (viewport.hasPointerCapture(event.pointerId)) {
+          viewport.releasePointerCapture(event.pointerId);
+        }
+      }
+
+      viewport.addEventListener('pointerup', endDrag);
+      viewport.addEventListener('pointercancel', endDrag);
+      applyTransform();
+    });
+  }
+
+  function renderMermaid() {
+    const result = mermaid.run
+      ? mermaid.run({ querySelector: '.mermaid' })
+      : Promise.resolve();
+    Promise.resolve(result)
+      .then(enhanceMermaidDiagrams)
+      .catch((error) => {
+        console.error('Mermaid render failed:', error);
+        enhanceMermaidDiagrams();
+      });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', renderMermaid);
+  } else {
+    renderMermaid();
+  }
+})();
+</script>
+
+</body>
+</html>

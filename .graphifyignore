@@ -1,0 +1,17 @@
+# Keep the repository graph focused on source and architecture artifacts.
+# Graphify uses this file instead of the root .gitignore when it is present.
+.git/
+.venv/
+.env
+.env.*
+__pycache__/
+*.py[cod]
+*.db
+*.db-shm
+*.db-wal
+.DS_Store
+.pytest_cache/
+*.egg-info/
+skills/catalog/.publish.lock
+skills/catalog/catalog-events.yaml
+graphify-out/
