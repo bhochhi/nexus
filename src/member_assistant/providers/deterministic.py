@@ -59,6 +59,25 @@ class DeterministicProvider(ModelProvider):
                     )
                 )
 
+        # Keep the offline demo responsive to a common balance phrasing that is
+        # semantically equivalent to the catalog's "how much money" example.
+        # Hosted semantic providers already recognize this without the fallback.
+        if "how much i have" in normalized and not any(
+            match.skill_name == "guided_balance" for match in matches
+        ):
+            balance_skill = next(
+                (skill for skill in catalog if skill.name == "guided_balance"), None
+            )
+            if balance_skill:
+                matches.append(
+                    GoalMatch(
+                        skill_name=balance_skill.name,
+                        goal=str(balance_skill.supported_goals[0]["name"]),
+                        confidence=0.84,
+                        inputs=self.extract_inputs(balance_skill, message),
+                    )
+                )
+
         if not matches and not (context or {}).get("active_skill"):
             prior_skill = next(
                 (
@@ -114,10 +133,13 @@ class DeterministicProvider(ModelProvider):
         elif missing_field and missing_field in extracted:
             slot_updates.append(SlotUpdate(missing_field, extracted[missing_field], 1.0))
         current_inputs = dict((context or {}).get("current_inputs") or {})
+        missing_field = str((context or {}).get("missing_field") or "")
+        correction_cues = ("actually", "instead", "change", "correction")
+        is_correction = any(cue in normalized for cue in correction_cues)
         for field_name, value in extracted.items():
             if current_inputs.get(field_name) not in {None, ""} and current_inputs.get(
                 field_name
-            ) != value:
+            ) != value and (not missing_field or field_name == missing_field or is_correction):
                 slot_updates.append(SlotUpdate(field_name, value, 1.0))
         return TurnAnalysis(
             goals=goals,

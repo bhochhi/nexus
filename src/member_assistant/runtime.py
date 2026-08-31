@@ -927,7 +927,13 @@ class AgentRuntime:
             "active_goal_relation": active_goal_relation,
             "catalog_revision": self.catalog.revision,
         }
-        if accepted_skill_gap:
+        # Reception is a runtime capability, not a catalog skill. Do not let a
+        # speculative provider skill-gap turn a clear "what can you do?" request
+        # into an unsupported-objective response or audit event.
+        is_reception_turn = not goals and self._is_greeting_or_capability_question(
+            message
+        )
+        if accepted_skill_gap and not is_reception_turn:
             self._record_skill_gap(
                 updates,
                 state,
@@ -992,10 +998,23 @@ class AgentRuntime:
                         accepted_skill_gap,
                         continuation=pending_goal["question"],
                     )
+                response = pending_goal["question"]
+                # An affirmative answer is meaningful for a confirmation, but it
+                # does not identify one item from two alternatives. Repeating the
+                # same either/or question leaves the member with no new guidance.
+                if self._is_affirmative(message) and len(pending_candidates) > 1:
+                    labels = [
+                        self._goal_label(candidate["skill_name"], candidate["goal"])
+                        for candidate in pending_candidates[:2]
+                    ]
+                    response = (
+                        "I can help with either. Please choose one first: say "
+                        "‘{}’ or ‘{}’."
+                    ).format(labels[0], labels[1])
                 updates.update(
                     goals=[],
                     next_action="finalize",
-                    response_parts=[pending_goal["question"]],
+                    response_parts=[response],
                 )
                 return updates
             conversation["pending_goal_clarification"] = None
@@ -1086,6 +1105,27 @@ class AgentRuntime:
                     response_parts=[pending_transition["question"]],
                 )
                 return updates
+
+        if is_reception_turn and active:
+            continuation = active.get("pending_question")
+            if active.get("status") == "awaiting_confirmation":
+                continuation = self._confirmation_copy(
+                    active,
+                    "retry_response",
+                    "Your current request is still waiting. Please answer yes to continue "
+                    "or no to cancel it.",
+                )
+            updates.update(
+                goals=[],
+                next_action="finalize",
+                response_parts=[
+                    "{} Your current request is still here. {}".format(
+                        self._reception_response(conversation, catalog),
+                        continuation or "What information would you like to provide next?",
+                    )
+                ],
+            )
+            return updates
 
         if active and active.get("status") == "awaiting_confirmation":
             if self._is_yes_or_no(message):
@@ -1182,7 +1222,7 @@ class AgentRuntime:
                 )
             return updates
 
-        if self._is_greeting_or_capability_question(message):
+        if is_reception_turn:
             updates.update(
                 next_action="finalize",
                 response_parts=[self._reception_response(conversation, catalog)],
@@ -2251,19 +2291,21 @@ class AgentRuntime:
                 "do my best to point you in the right direction."
             ).format(name)
         templates = (
-            "Hi {name}. I'm glad you reached out. I can currently help you "
-            "{capabilities}. What can I help you with today?",
-            "Hi {name}. I can help you {capabilities}. What would you like to "
-            "take care of today?",
-            "Hi {name}. You can ask me to {capabilities}. Where would you like "
-            "to begin?",
+            "I'm glad you reached out. I can currently help you {capabilities}. "
+            "What can I help you with today?",
+            "I can help you {capabilities}. What would you like to take care of today?",
+            "You can ask me to {capabilities}. Where would you like to begin?",
         )
         variant = conversation.get("reception_variant")
         if not isinstance(variant, int) or not 0 <= variant < len(templates):
             variant = uuid.uuid4().int % len(templates)
-            conversation["reception_variant"] = variant
-        return templates[variant].format(
-            name=name, capabilities=self._join_choices(capabilities)
+        # Cycle controlled templates so capability questions do not get the same
+        # canned reply throughout a session. The wording remains catalog-derived.
+        conversation["reception_variant"] = (variant + 1) % len(templates)
+        opening = "Hi {}. ".format(name) if not conversation.get("greeted") else ""
+        conversation["greeted"] = True
+        return opening + templates[variant].format(
+            capabilities=self._join_choices(capabilities)
         )
 
     def _unmatched_reception_response(
@@ -2350,17 +2392,31 @@ class AgentRuntime:
     @staticmethod
     def _is_greeting_or_capability_question(message: str) -> bool:
         normalized = " ".join(re.findall(r"[a-z]+", message.casefold()))
-        return normalized in {
+        greeting = normalized in {
             "hi",
             "hello",
             "hey",
             "good morning",
             "good afternoon",
             "good evening",
-        } or any(
+        }
+        capability_phrase = any(
             phrase in normalized
             for phrase in ("what can you do", "how can you help", "what are your skills")
         )
+        # Accept conversational word-order variants such as "what can else you
+        # do?" as a request for the installed capability list, not as an
+        # unrecognized banking request.
+        words = set(normalized.split())
+        capability_variant = bool(
+            # Natural wording may place "else" before "you can" (for example,
+            # "what else you can do?"). The intent is still unambiguous.
+            "what" in words
+            and "do" in words
+            and ({"you", "u"} & words)
+            and ({"can", "else"} & words)
+        ) or "what other services" in normalized
+        return greeting or capability_phrase or capability_variant
 
     @staticmethod
     def _is_frustrated(message: str) -> bool:
@@ -2404,7 +2460,9 @@ class AgentRuntime:
 
     @staticmethod
     def _is_explicit_multi_goal(message: str) -> bool:
-        return bool(re.search(r"\b(and|also|then|as well as)\b", message.casefold()))
+        return bool(
+            re.search(r"\b(and|also|then|as well as|but)\b", message.casefold())
+        )
 
     def _goal_label(self, skill_name: str, goal_name: str) -> str:
         definition = next(
@@ -2460,7 +2518,15 @@ class AgentRuntime:
     @staticmethod
     def _is_affirmative(message: str, resume_words: bool = False) -> bool:
         normalized = re.sub(r"[^a-z ]", "", message.lower()).strip()
-        words = {"yes", "y", "confirm", "approve", "proceed", "do it"}
+        words = {
+            "yes",
+            "yes please",
+            "y",
+            "confirm",
+            "approve",
+            "proceed",
+            "do it",
+        }
         if resume_words:
             words.update({"resume", "continue", "pick it back up"})
         return normalized in words

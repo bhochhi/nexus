@@ -41,6 +41,20 @@ class MockAccountTool:
         tokens = set(normalized.split())
         if "saving" in tokens:
             tokens.add("savings")
+        # A member may provide both an account type and the last four digits.
+        # Resolve the specific suffix before accepting a broad type match; otherwise
+        # "checking 1003" incorrectly resolves to the first checking account.
+        suffixes = set(re.findall(r"\b\d{4}\b", normalized))
+        if suffixes:
+            matching_suffixes = [
+                account
+                for account in self._accounts
+                if account.masked_number[-4:] in suffixes
+            ]
+            if len(matching_suffixes) == 1:
+                return matching_suffixes[0]
+        exact_matches = []
+        partial_matches = []
         for account in self._accounts:
             candidates = {
                 account.account_id,
@@ -52,12 +66,21 @@ class MockAccountTool:
                 " ".join(re.findall(r"[a-z0-9]+", candidate.lower()))
                 for candidate in candidates
             }
-            if normalized in normalized_candidates or any(
+            if normalized in normalized_candidates:
+                exact_matches.append(account)
+            elif any(
                 set(candidate.split()).issubset(tokens)
                 for candidate in normalized_candidates
                 if candidate
             ):
-                return account
+                partial_matches.append(account)
+        if len(exact_matches) == 1:
+            return exact_matches[0]
+        if len(partial_matches) == 1:
+            return partial_matches[0]
+        # A type-only reference such as "checking" can match several eligible
+        # accounts. A consequential workflow must ask for a specific account,
+        # never pick whichever account happens to appear first in the tool list.
         return None
 
     def invoke(self, action: str, arguments: Dict[str, Any]) -> Any:
