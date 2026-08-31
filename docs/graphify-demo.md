@@ -8,16 +8,33 @@ secrets, logs, or production traces.
 
 ## Install
 
-Graphify requires Python 3.10 or newer. Install it as an isolated developer tool
-so it does not change the application's Python dependencies:
+Graphify requires Python 3.10 or newer. It is exposed as a separate project
+extra because the base application continues to support Python 3.9. With an
+existing Python 3.10+ project environment, install it using ordinary `pip`:
 
 ```bash
-uv tool install graphifyy==0.9.53
+python -m pip install -e '.[graphify]'
 ```
 
-`pipx install graphifyy==0.9.53` is an equivalent isolated installation. The
-package name has two trailing `y` characters; the installed command is
-`graphify`.
+To install the test tools and Graphify together:
+
+```bash
+python -m pip install -e '.[dev,graphify]'
+```
+
+If the application's virtual environment uses Python 3.9, create a small
+Graphify-only environment using any Python 3.10+ executable already installed
+on the workstation:
+
+```bash
+python3.11 -m venv .venv-graphify
+source .venv-graphify/bin/activate
+python -m pip install -e '.[graphify]'
+```
+
+Replace `python3.11` with `python3.10`, `python3.12`, or `python3.13` as
+available. No `uv` or `pipx` installation is required. The PyPI package name
+has two trailing `y` characters; the installed command is `graphify`.
 
 The project-scoped Codex skill and guidance are already checked in under
 `.codex/skills/graphify/` and `AGENTS.md`. Installing the CLI makes those

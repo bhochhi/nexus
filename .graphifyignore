@@ -2,6 +2,7 @@
 # Graphify uses this file instead of the root .gitignore when it is present.
 .git/
 .venv/
+.venv-graphify/
 .env
 .env.*
 __pycache__/

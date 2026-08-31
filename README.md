@@ -5,7 +5,9 @@ A small, runnable financial-services member-assistance proof of concept built wi
 An interactive, development-only code map is available in
 [`graphify-out/graph.html`](graphify-out/graph.html). See
 [`docs/graphify-demo.md`](docs/graphify-demo.md) for installation, queries, graph
-refresh instructions, and a short team walkthrough.
+refresh instructions, and a short team walkthrough. Graphify is an optional
+Python 3.10+ developer extra installed with `python -m pip install -e
+'.[graphify]'`; it is not an application runtime dependency.
 
 ## What is included
 

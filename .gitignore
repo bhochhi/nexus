@@ -1,4 +1,5 @@
 .venv/
+.venv-graphify/
 .env
 .env.*
 !.env.example
