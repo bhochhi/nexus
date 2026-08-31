@@ -6,6 +6,35 @@ coding assistant. It is not part of the member-assistant runtime, does not
 replace LangGraph, and must not be pointed at member data, local databases,
 secrets, logs, or production traces.
 
+## What this visualization represents
+
+The generated graph is a **static source-code map**. It reads Python symbols,
+imports, calls, types, and inferred relationships to show the routes a request
+can take through the code. `CALL_FLOW.html` is a presentation of those static
+relationships; it is not a recording of a request that actually ran.
+
+For this application, Graphify helps navigate the possible path from FastAPI
+and WebSocket handling into `AgentRuntime.stream_chat`, the compiled LangGraph,
+policy evaluation, generic skill execution, tools, durable events, and the
+SQLite state store. It is especially useful for architecture reviews and change
+impact analysis.
+
+Graphify does not show runtime inputs, the exact branch selected for one member,
+model/tool latency, failures, or checkpoint state. Use the application's
+OpenTelemetry/Langfuse tracing and durable event stream for a live request
+trace. Graphify and runtime observability are complementary views:
+
+| View | Answers |
+| --- | --- |
+| Graphify | What code is connected, and what could be affected by a change? |
+| Langfuse/OpenTelemetry | What happened during this particular request? |
+| Durable event/state store | What member-visible events and state were persisted? |
+
+Graphify reads source files but does not rewrite, lint, test, or instrument
+anything under `src/`. All generated repository artifacts stay under
+`graphify-out/`. The project Codex hook only checks for Graphify guidance; it is
+not an application runtime hook or a source-code quality gate.
+
 ## Install
 
 Graphify requires Python 3.10 or newer. It is exposed as a separate project
@@ -125,10 +154,10 @@ HTML locally without an LLM or API key.
 Run these from the repository root:
 
 ```bash
-graphify query "How does a member WebSocket message reach AgentRuntime?"
-graphify query "What calls the transfer tool and what policy code is nearby?" --dfs
 graphify query "Where is durable conversation state loaded and saved?"
-graphify path "stream_session" "execute_transfer"
+graphify path "create_app" "stream_chat"
+graphify path "AgentRuntime" "PolicyEngine"
+graphify path "AgentRuntime" "SQLiteConversationStore"
 graphify explain "AgentRuntime"
 graphify affected "ConversationState" --depth 3
 ```
@@ -162,12 +191,18 @@ manifest, cost, and model-generated labeling files are intentionally ignored.
 
 ## Suggested team walkthrough
 
-1. Open the interactive graph and locate `AgentRuntime`.
-2. Follow `stream_chat` into the compiled LangGraph lifecycle.
-3. Trace policy and confirmation paths before skill/tool execution.
-4. Locate SQLite conversation-state and durable-event persistence.
-5. Run an impact query for `ConversationState` to preview the future checkpoint
-   migration blast radius.
+1. Open `CALL_FLOW.html` for the static application overview.
+2. Open the interactive graph and search for `AgentRuntime`.
+3. Demonstrate the gateway-to-runtime relationship with
+   `graphify path "create_app" "stream_chat"`.
+4. Show the policy and persistence dependencies with
+   `graphify path "AgentRuntime" "PolicyEngine"` and
+   `graphify path "AgentRuntime" "SQLiteConversationStore"`.
+5. Follow `stream_chat` into the compiled LangGraph lifecycle and generic skill
+   execution nodes.
+6. Run `graphify affected "ConversationState" --depth 3` to preview the future
+   checkpoint-migration blast radius.
+7. Contrast this static view with one real member-turn trace in Langfuse.
 
 Graphify output is a snapshot. Refresh it whenever source-level architecture
 changes are merged.
