@@ -33,6 +33,10 @@ The local POC represents active catalog assignments in `active.yaml`. That file
 is useful for local discovery, but it is not an appropriate production control
 plane or artifact registry.
 
+Repository topology is independent of this delivery boundary. Platform and
+capability source can remain in one Git repository while their CI/CD pipelines
+produce and promote different deployable artifacts.
+
 ## Decision
 
 Deploy platform code through the platform CI/CD pipeline and distribute
@@ -50,10 +54,25 @@ capability releases independently as immutable OCI artifacts.
   not the only recovery mechanism.
 - Keep draft preview isolated. Production publication or promotion must be tied
   to an approved GitLab change and controlled service identity.
+- Keep platform and capability sources in one repository initially. Reconsider
+  a separate capability repository only when ownership, access control, scale,
+  or release throughput justifies it.
+- Compose local development through an explicit, worktree-private catalog or
+  capability-workspace path. Never make a production runtime scan authoring
+  directories.
+- Scope shared-development assignments by a workspace or preview identifier so
+  one branch cannot change routing for another branch's runtime.
+- Promote the exact tested OCI content into production without rebuilding it.
 
 The exact catalog database and event transport remain replaceable behind
 platform interfaces. `active.yaml` remains the local implementation and may be
 materialized as a non-authoritative cache.
+
+If DynamoDB is selected for the catalog, it stores environment-scoped
+assignments, content digests, compatibility requirements, and catalog revisions
+as records. It does not store `active.yaml` as the authoritative production
+artifact. A change stream may provide low-latency notification, while periodic
+reconciliation remains the recovery path.
 
 ## Alternatives considered
 
@@ -67,6 +86,14 @@ materialized as a non-authoritative cache.
 - **Use Git alone as the runtime registry.** Rejected because Git review is
   useful for source governance but is not an artifact distribution or fleet
   activation control plane.
+- **Require separate Git repositories immediately.** Rejected for the initial
+  implementation because repository separation adds cross-repository workflow
+  before ownership or scale requires it. Independent build and publication
+  pipelines provide the needed delivery separation inside one repository.
+- **Use symlinks as the platform/capability integration contract.** Rejected
+  because symlinks create machine-specific hidden state and are unreliable
+  across containers and CI. Explicit workspace paths and bind mounts remain
+  available as local composition mechanisms.
 
 ## Consequences
 
@@ -79,6 +106,9 @@ materialized as a non-authoritative cache.
 - Connector or platform extensions must deploy before dependent capabilities.
 - Production availability depends on catalog reconciliation and the cached
   last-known-good artifact set, not on every event being delivered.
+- Local preview requires a private catalog per worktree or preview session.
+- A future repository split requires a versioned platform capability contract,
+  not a circular source dependency between the repositories.
 
 ## Enforcement
 
@@ -90,6 +120,8 @@ materialized as a non-authoritative cache.
   requests through GitLab CI/CD and backend workload identity.
 - `PF-CAPABILITY-AUTHORING-DELIVERY` defines the observable authoring, preview,
   publication, discovery, and failure behavior.
+- `docs/capability-development-and-release-environments.md` defines the current
+  local composition workflow and the intended environment model.
 
 ## Supersession
 

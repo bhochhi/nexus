@@ -554,20 +554,26 @@ timestamp, version, hash, and catalog revision to the local
 
 ## Add a skill
 
-Business authors create one `SKILL.md` with structured YAML frontmatter and a
-readable Markdown body. It declares ownership, semantic version, goals, inputs,
-behavior dimensions, governance, approved tools, response design, optional
-workflow, and acceptance scenarios. Publication stores that same source as
-`skills/catalog/<name>/<version>/SKILL.md`; `active.yaml` contains only routing
-metadata and active-version pointers.
+Business authors begin with
+`specifications/capabilities/<name>/CAPABILITY.md`. The development workflow
+produces the adjacent candidate `SKILL.md` with structured YAML frontmatter and
+a readable Markdown body. It declares ownership, semantic version, goals,
+inputs, behavior dimensions, governance, approved tools, response design,
+optional workflow, and executable acceptance scenarios. Publication stores
+that same candidate as an immutable versioned artifact; the catalog contains
+only published packages, routing metadata, and active-version pointers.
 
 ```bash
-member-assistant-skills validate skills/available/online_id_recovery/SKILL.md
-member-assistant-skills publish skills/available/online_id_recovery/SKILL.md
-member-assistant-skills active
-member-assistant-skills versions --name online_id_recovery
-member-assistant-skills deactivate online_id_recovery
+member-assistant-skills validate \
+  specifications/capabilities/online-id-recovery/SKILL.md
 ```
+
+For branch-isolated local publication, copy the baseline to a temporary catalog
+and pass that path to both `member-assistant-skills --catalog` and
+`member-assistant-server --catalog`. Do not mutate the checked-in POC baseline
+for draft testing. See
+[Capability development and release environments](docs/capability-development-and-release-environments.md)
+for the exact commands and the JFrog/catalog-control-plane design.
 
 Built-in archetypes are authoring presets, not a closed list of business
 capabilities. A custom archetype works without new Python when it compiles to
@@ -584,8 +590,8 @@ semantic version, publish it, and use `member-assistant-skills activate` to move
 the active pointer forward or back. Consequential calls must remain immediately
 after confirmation and still pass deterministic policy at execution time.
 
-The complete contract, call flow, behavior axes, and production control-plane
-roadmap are in [Nexus Skill v1 authoring and publication](docs/skill-authoring-and-publication.md).
+The complete contract and behavior axes are in
+[Nexus Skill v1 authoring and publication](docs/skill-authoring-and-publication.md).
 
 ## Tests
 

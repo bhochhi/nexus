@@ -22,6 +22,12 @@ implementation and must trace its acceptance cases back to stable capability
 acceptance IDs. Publication copies a validated skill into the immutable catalog;
 the published catalog copy is not edited in place.
 
+The platform runtime does not scan or route directly from this directory. The
+adjacent `SKILL.md` is an editable candidate. Local preview explicitly publishes
+candidate overrides into a worktree-private temporary catalog; shared runtimes
+load only published artifacts selected through their catalog assignment. See
+`docs/capability-development-and-release-environments.md`.
+
 Candidate skills record traceability under `metadata.capability`: capability ID,
 repository specification path, and the complete acceptance-ID set. Executable
 acceptance scenarios reuse those stable IDs. The compiler includes this
@@ -44,6 +50,10 @@ currently released; it is historical/runtime evidence, not the file to edit.
 Candidate versions are not active merely because they exist in the source
 package. They must pass verification and the separate publication/activation
 workflow.
+
+The checked-in `skills/catalog/` is the POC's published baseline and local
+catalog fixture. In production, immutable packages live in JFrog Artifactory and
+the active version/digest is held by the catalog control plane rather than Git.
 
 ## Archetype templates
 

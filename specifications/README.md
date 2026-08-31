@@ -40,4 +40,6 @@ evidence without creating generated source-of-truth files.
 The operating model is documented in `docs/spec-driven-development.md`. Every
 capability change uses `templates/impact-analysis-template.md` to decide whether
 it is capability-only, needs a connector extension, or depends on a platform
-extension.
+extension. Local composition, repository strategy, environment isolation,
+JFrog publication, catalog assignment, and hot reload are documented in
+`docs/capability-development-and-release-environments.md`.

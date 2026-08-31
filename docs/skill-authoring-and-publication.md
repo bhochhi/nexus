@@ -415,6 +415,13 @@ put the same artifacts and pointers behind an authenticated publication API and
 durable object store, then notify runtimes through an event or
 cache-invalidation channel.
 
+Developers should not publish draft experiments into the checked-in baseline.
+The publisher and server both accept an explicit catalog path, so each worktree
+can copy the baseline into a private temporary catalog, publish its candidate
+overrides there, and run an isolated server. The complete command sequence and
+future branch-scoped/JFrog environment model are documented in
+`docs/capability-development-and-release-environments.md`.
+
 ## One runtime artifact, cohesive authoring package
 
 Only `CAPABILITY.md` is required for an initial business draft. The development
@@ -478,6 +485,12 @@ The local POC does not pretend to provide enterprise approval RBAC. Git review
 records source approval, while publisher events record staged publication,
 activation, rollback, and deactivation. A production catalog can enforce the
 same states with authenticated approvals without changing runtime discovery.
+
+Independent capability delivery does not require a separate Git repository.
+The initial implementation keeps platform and capability sources together while
+their pipelines produce separate artifacts. If repository ownership is split
+later, both repositories integrate through a versioned platform capability
+contract and explicit local workspace paths, not a circular source dependency.
 
 ## Archetypes are presets, not a closed capability taxonomy
 

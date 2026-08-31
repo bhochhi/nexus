@@ -5,7 +5,7 @@ metadata:
   id: PF-CAPABILITY-AUTHORING-DELIVERY
   name: capability-authoring-and-delivery
   status: draft
-  version: 0.1.0
+  version: 0.2.0
   owner: Agentic Conversation Platform
 enforces:
   - INV-CAPABILITY-PULL-001
@@ -29,8 +29,13 @@ skills without a runtime redeployment.
   implementation and classifies work as capability-only, connector extension,
   or platform extension.
 - Drafts can run in an isolated local preview without publication.
+- A local preview consumes a worktree-private catalog assembled from a released
+  baseline and explicit candidate overrides; the production runtime never scans
+  the business specification tree.
 - A shared test request may create a short-lived OCI preview artifact scoped to
   the authoring workspace and test environment.
+- Shared-development assignments include a workspace or preview identity, and a
+  runtime observes only assignments for its own identity.
 - Artifact publishing occurs through a backend publication service, never from
   credentials exposed to the browser.
 - Production publication or promotion references an approved change request and
@@ -43,6 +48,10 @@ skills without a runtime redeployment.
 - A failed artifact retains the last-known-good active capability and produces
   an operationally visible rejection.
 - In-flight plans remain pinned to their original version and digest.
+- Test and production assignments use fixed versions and digests. Promotion to
+  production copies the tested content without rebuilding it.
+- Repository topology does not determine delivery topology. Platform and
+  capability source may share one repository while using independent pipelines.
 
 ## Acceptance criteria
 
@@ -71,6 +80,21 @@ skills without a runtime redeployment.
 - **AC-PF-CAP-008 — Version continuity:** Given an active plan uses one artifact
   digest, when a newer capability activates, then that plan continues with its
   original digest while new goals may use the new assignment.
+- **AC-PF-CAP-009 — Worktree-isolated local catalog:** Given two developers or
+  agents preview candidates from different worktrees, when either candidate is
+  changed or activated, then only the runtime using that worktree's private
+  catalog observes the change.
+- **AC-PF-CAP-010 — Scoped shared-development assignment:** Given two shared-dev
+  runtimes use different preview identities, when a snapshot is assigned to one
+  identity, then the other runtime neither routes to nor downloads that
+  snapshot through its catalog assignment.
+- **AC-PF-CAP-011 — Exact-content promotion:** Given a capability digest passed
+  the test gates, when it is promoted to production, then production receives
+  the same content digest and no build step recreates the capability package.
+- **AC-PF-CAP-012 — Catalog projection:** Given the production catalog uses a
+  database-backed control plane, when a runtime requests its active catalog,
+  then it receives a coherent environment-scoped revision equivalent to the
+  local `active.yaml` contract without treating that file as production source.
 
 ## Examples
 
@@ -101,6 +125,10 @@ activation until that platform version is deployed.
 - One runtime instance rejects a dependency that other instances support.
 - A mutable OCI tag points at a different digest after testing.
 - An author edits a draft while a preview conversation is active.
+- Two worktrees use the same capability version but contain different draft
+  hashes.
+- A shared-dev activation event is delivered to a runtime in another preview
+  workspace.
 - A production request references an expired or unapproved change.
 - The platform deploy rolls back while a capability requires its newer runtime
   contract.
@@ -111,7 +139,11 @@ activation until that platform version is deployed.
 - Contract tests for publication-service backends and catalog adapters.
 - Artifact digest, signature, compatibility, and dependency failure tests.
 - Local and shared-preview isolation tests.
+- Worktree overlay, preview-scope filtering, and temporary-catalog cleanup
+  tests.
 - Event-loss and periodic-reconciliation tests.
+- Cross-repository content-copy tests proving test and production use the same
+  OCI digest when separate registries are configured.
 - Mixed-version, in-flight pinning, and rollback tests.
 - Authorization tests proving browser identities cannot publish directly to a
   production repository or activate a production assignment.

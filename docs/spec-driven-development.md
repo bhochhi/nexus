@@ -131,6 +131,9 @@ test. These preview artifacts:
 ## Capability publication and runtime discovery
 
 Nexus separates platform deployment from capability distribution.
+This is an artifact and pipeline boundary, not a requirement to split the Git
+repository. Platform and capability source remain together initially and can
+still produce independently released outputs.
 
 ```text
 authoring UI or GitLab pipeline
@@ -179,6 +182,19 @@ missed events. In-flight plans remain pinned to their original version/digest.
 The POC's `skills/catalog/active.yaml` is the local representation of the
 catalog assignment and revision. In production, the authoritative assignment
 belongs to a catalog control plane; a generated local snapshot is only a cache.
+If DynamoDB is chosen, it stores scoped assignment and revision records rather
+than the YAML file as one opaque source-of-truth object.
+
+Local development uses a worktree-private catalog containing a released
+baseline plus candidate overrides. A production runtime never scans the
+capability specification tree. Shared-development publication uses a preview or
+workspace identity so one branch cannot affect another branch's runtime. Test
+and production use fixed versions and digests, and production promotion copies
+the exact content tested rather than rebuilding it.
+
+See `docs/capability-development-and-release-environments.md` for the current
+local commands, the future authoring-service flow, optional repository
+separation, environment scoping, and production hot-reload design.
 
 ## Platform and capability release ordering
 
@@ -204,11 +220,17 @@ the platform.
 
 ## Near-term implementation sequence
 
-1. Keep the initial platform capability surface synchronized with runtime code
+1. Keep platform and capability source in this repository while retaining
+   independent validation, publication, and platform-deployment pipelines.
+2. Keep the initial platform capability surface synchronized with runtime code
    and expand tool/event contract detail.
-2. Require a persisted impact-analysis result for each capability change.
-3. Build local draft preview and hot reload.
-4. Exercise the complete workflow with internal transfer.
-5. Add a publication-service interface with a local filesystem backend.
-6. Add JFrog OCI and catalog-control-plane adapters behind that interface.
-7. Add the browser authoring and test experience over the same APIs.
+3. Require a persisted impact-analysis result for each capability change.
+4. Automate a worktree-private draft catalog that overlays candidates on a
+   selected released baseline.
+5. Exercise the complete workflow with internal transfer.
+6. Add a publication-service interface with a local filesystem backend.
+7. Add JFrog OCI and environment-scoped catalog-control-plane adapters behind
+   that interface.
+8. Add the browser authoring and test experience over the same APIs.
+9. Reconsider a separate capability repository only when ownership, access
+   control, scale, or release throughput provides a concrete benefit.
