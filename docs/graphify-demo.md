@@ -43,7 +43,42 @@ it does not add Graphify to the member-assistant process.
 
 ## View the checked-in graph
 
-Open `graphify-out/graph.html` in a browser. It is a static, interactive view:
+First run these commands from the repository root:
+
+```bash
+pwd
+ls graphify-out/graph.html graphify-out/CALL_FLOW.html
+```
+
+If `graphify-out/graph.html` does not exist, confirm that the machine has the
+branch containing the Graphify artifacts. During review that is
+`codex/graphify-demo`; after merge it will be `codex/demo`:
+
+```bash
+git fetch origin
+git switch codex/graphify-demo  # use codex/demo after the feature is merged
+git pull
+```
+
+If `git switch` reports that the branch is unknown, it has not been pushed to
+the shared remote yet. The branch owner must push it or merge it before another
+machine can receive the checked-in graph.
+
+Open the static files using the command appropriate for the workstation:
+
+```bash
+# macOS
+open graphify-out/graph.html
+open graphify-out/CALL_FLOW.html
+
+# Linux
+xdg-open graphify-out/graph.html
+
+# Windows PowerShell
+Start-Process graphify-out/graph.html
+```
+
+The interactive graph supports the following walkthrough:
 
 - search for `AgentRuntime`, `stream_chat`, or `_build_graph`;
 - select a node to inspect callers and dependencies;
@@ -53,6 +88,37 @@ Open `graphify-out/graph.html` in a browser. It is a static, interactive view:
 
 The checked-in graph is generated from source code only. This keeps generation
 deterministic and avoids sending repository documents to an LLM backend.
+
+### Browser fallback: serve the files locally
+
+A server is not normally required. If corporate browser policy blocks local
+`file://` pages, start a local static server from the repository root:
+
+```bash
+python -m http.server 8765 --bind 127.0.0.1
+```
+
+Keep that terminal running and open:
+
+- `http://127.0.0.1:8765/graphify-out/graph.html`
+- `http://127.0.0.1:8765/graphify-out/CALL_FLOW.html`
+
+Stop the server with `Ctrl-C`. It is only a local file server; the member
+assistant does not need to be running.
+
+### Generate the files when they are absent
+
+After installing the `graphify` extra, a first-time source-only build is:
+
+```bash
+graphify extract . --code-only --out .
+graphify cluster-only . --no-label
+graphify export callflow-html graphify-out/graph.json \
+  --output graphify-out/CALL_FLOW.html
+```
+
+This creates the graph JSON, interactive HTML, architecture report, and call-flow
+HTML locally without an LLM or API key.
 
 ## Query the graph
 
@@ -85,6 +151,7 @@ For a clean source-only rebuild:
 
 ```bash
 graphify extract . --code-only --out .
+graphify cluster-only . --no-label
 graphify export callflow-html graphify-out/graph.json \
   --output graphify-out/CALL_FLOW.html
 ```
