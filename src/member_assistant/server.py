@@ -15,6 +15,7 @@ from member_assistant.runtime import AgentRuntime
 
 
 MAX_MEMBER_MESSAGE_LENGTH = 20_000
+SESSION_EXPIRED_CLOSE_CODE = 4001
 
 
 class SessionRequest(BaseModel):
@@ -303,16 +304,38 @@ def create_app(
         sender = asyncio.create_task(
             send_events(), name="member-assistant-socket-sender"
         )
+        session_ttl = float(active_runtime.store.session_ttl_seconds)
+        idle_deadline = (
+            asyncio.get_running_loop().time() + session_ttl
+            if session_ttl > 0
+            else None
+        )
 
         try:
             while True:
-                request = await websocket.receive_json()
+                if idle_deadline is None:
+                    request = await websocket.receive_json()
+                else:
+                    remaining = idle_deadline - asyncio.get_running_loop().time()
+                    if remaining <= 0:
+                        raise asyncio.TimeoutError
+                    request = await asyncio.wait_for(
+                        websocket.receive_json(), timeout=remaining
+                    )
                 request_type = request.get("type")
                 if request_type == "session.ping":
                     await outgoing.put(
                         {"type": "session.pong", "session_id": session_id}
                     )
                     continue
+                if request_type in {
+                    "member.join",
+                    "member.message",
+                    "live_support.cancel",
+                } and session_ttl > 0:
+                    # Protocol heartbeats prove that the transport is healthy but
+                    # do not extend the member's application-session lifetime.
+                    idle_deadline = asyncio.get_running_loop().time() + session_ttl
                 if request_type == "member.join":
                     try:
                         state = active_runtime.set_member_name(
@@ -406,6 +429,25 @@ def create_app(
                     )
                     continue
                 schedule_turn(session_id, content, client_message_id)
+        except asyncio.TimeoutError:
+            # Use one writer for the terminal event so it is delivered before the
+            # close frame. The private close code lets clients distinguish an
+            # intentional application-session expiry from a network interruption.
+            sender.cancel()
+            await asyncio.gather(sender, return_exceptions=True)
+            try:
+                await websocket.send_json(
+                    {
+                        "type": "session.expired",
+                        "session_id": session_id,
+                        "reason": "inactivity_timeout",
+                        "final": True,
+                    }
+                )
+                await websocket.close(code=SESSION_EXPIRED_CLOSE_CODE)
+            except (RuntimeError, WebSocketDisconnect):
+                pass
+            return
         except WebSocketDisconnect:
             return
         finally:

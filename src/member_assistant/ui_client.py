@@ -7,6 +7,10 @@ import time
 from typing import Any, Dict, List, Optional
 
 
+TERMINAL_EVENT_TYPES = frozenset({"session.expired"})
+SESSION_EXPIRED_CLOSE_CODE = 4001
+
+
 class RealtimeWebSocketClient:
     def __init__(self, url: str, initial_event: Optional[Dict[str, Any]] = None):
         self.url = url
@@ -46,8 +50,24 @@ class RealtimeWebSocketClient:
                         except TimeoutError:
                             continue
                         if payload is not None:
-                            self.events.put(json.loads(payload))
+                            event = json.loads(payload)
+                            self.events.put(event)
+                            if event.get("type") in TERMINAL_EVENT_TYPES:
+                                # An intentional application-session close must
+                                # return control to the sign-in flow. Reconnecting
+                                # is reserved for transient transport failures.
+                                self._stop.set()
+                                return
             except Exception as exc:
+                if getattr(exc, "code", None) == SESSION_EXPIRED_CLOSE_CODE:
+                    self.events.put(
+                        {
+                            "type": "session.expired",
+                            "reason": "inactivity_timeout",
+                        }
+                    )
+                    self._stop.set()
+                    return
                 if not self._stop.is_set():
                     self.events.put(
                         {

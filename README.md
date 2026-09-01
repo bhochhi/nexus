@@ -114,9 +114,13 @@ member-assistant --session transfer-demo-01
 
 Conversation snapshots expire after 10 minutes of inactivity by default. The
 application removes expired snapshots at startup, when state is loaded, and
-periodically while it is running. Audit events are retained for troubleshooting
-and skill-gap reporting. Configure seconds in an environment file, use a CLI
-override for a particular run, or set either value to zero to disable expiry:
+periodically while it is running. A member WebSocket that reaches the same idle
+limit receives a terminal `session.expired` event and is then closed with code
+`4001`; transport-level ping/pong traffic does not extend the application
+session. The demo UI returns to sign-in instead of reconnecting automatically.
+Audit events are retained for troubleshooting and skill-gap reporting. Configure
+seconds in an environment file, use a CLI override for a particular run, or set
+either value to zero to disable expiry:
 
 ```bash
 SESSION_TTL_SECONDS=600

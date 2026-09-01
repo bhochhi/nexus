@@ -1,6 +1,10 @@
+import time
+
+import pytest
+from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 
-from member_assistant.server import create_app
+from member_assistant.server import SESSION_EXPIRED_CLOSE_CODE, create_app
 
 
 def test_runtime_streams_semantic_multi_goal_messages_and_persists_replay(
@@ -152,3 +156,53 @@ def test_session_events_fan_out_to_multiple_connected_clients(runtime_factory):
     assert [event["event_id"] for event in member_events] == [
         event["event_id"] for event in observer_events
     ]
+
+
+def test_member_websocket_sends_expiry_event_then_closes_after_inactivity(
+    runtime_factory,
+):
+    runtime = runtime_factory()
+    runtime.store.session_ttl_seconds = 0.05
+    app = create_app(runtime, close_runtime=False)
+
+    with TestClient(app) as client:
+        with client.websocket_connect(
+            "/v1/sessions/expiring-member/stream"
+        ) as websocket:
+            assert websocket.receive_json()["type"] == "session.ready"
+            websocket.send_json({"type": "member.join", "name": "Rupee"})
+            assert websocket.receive_json()["type"] == "member.ready"
+
+            expired = websocket.receive_json()
+            assert expired == {
+                "type": "session.expired",
+                "session_id": "expiring-member",
+                "reason": "inactivity_timeout",
+                "final": True,
+            }
+            with pytest.raises(WebSocketDisconnect) as closed:
+                websocket.receive_json()
+
+    assert closed.value.code == SESSION_EXPIRED_CLOSE_CODE
+
+
+def test_protocol_ping_does_not_extend_member_session_ttl(runtime_factory):
+    runtime = runtime_factory()
+    runtime.store.session_ttl_seconds = 0.1
+    app = create_app(runtime, close_runtime=False)
+
+    with TestClient(app) as client:
+        with client.websocket_connect(
+            "/v1/sessions/ping-does-not-refresh/stream"
+        ) as websocket:
+            assert websocket.receive_json()["type"] == "session.ready"
+            websocket.send_json({"type": "member.join", "name": "Rupee"})
+            assert websocket.receive_json()["type"] == "member.ready"
+
+            time.sleep(0.06)
+            websocket.send_json({"type": "session.ping"})
+            assert websocket.receive_json()["type"] == "session.pong"
+
+            # If ping renewed the application session, this would not arrive
+            # until another full TTL after the ping.
+            assert websocket.receive_json()["type"] == "session.expired"

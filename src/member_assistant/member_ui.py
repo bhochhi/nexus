@@ -68,6 +68,7 @@ st.session_state.setdefault("connection", "connecting")
 st.session_state.setdefault("notice", "")
 st.session_state.setdefault("member_ready", False)
 st.session_state.setdefault("last_scrolled_message_count", 0)
+st.session_state.setdefault("session_expired", False)
 
 st.markdown(
     """<div class="hero"><h1>Conversation-First Member Experience</h1>
@@ -132,6 +133,13 @@ def _process(event: Dict[str, Any]) -> None:
     elif event_type == "connection.error":
         st.session_state.connection = "reconnecting"
         st.session_state.notice = event.get("error", "Connection interrupted")
+    elif event_type == "session.expired":
+        st.session_state.connection = "expired"
+        st.session_state.member_ready = False
+        st.session_state.session_expired = True
+        st.session_state.notice = (
+            "Your session expired after a period of inactivity. Sign in again to continue."
+        )
     elif event_type == "session.ready":
         st.session_state.messages = [
             {
@@ -207,6 +215,13 @@ def _process(event: Dict[str, Any]) -> None:
 def conversation() -> None:
     for incoming in st.session_state.client.drain():
         _process(incoming)
+
+    if st.session_state.session_expired:
+        st.warning(st.session_state.notice)
+        if st.button("Sign in again", type="primary", use_container_width=True):
+            _reset()
+            st.rerun()
+        return
 
     mode = st.session_state.mode
     case = st.session_state.case or {}
