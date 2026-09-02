@@ -16,12 +16,18 @@ audited background work, that entity can be specified separately.
 ## Layout
 
 - `platform/adr/` records durable architectural decisions.
+- `platform/foundations/` defines stable platform responsibilities, invariants,
+  and interfaces without naming a concrete business skill or runtime goal.
 - `platform/features/` holds human-readable, executable shared conversational
   behavior in Markdown.
 - `capabilities/` holds cohesive business capability authoring packages.
 - `contracts/` holds machine-readable tool and event contracts.
 - `workflow/` at the repository root defines the engineering lifecycle and
   contains provider adapters only; it is not a business or runtime contract.
+
+See `SCHEMA.md` for artifact authority, required fields, naming, references,
+lifecycle, and the distinction between foundations, features, capabilities,
+runtime skills, contracts, and change evidence.
 
 Validate the portable artifacts with:
 

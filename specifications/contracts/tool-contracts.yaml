@@ -1,11 +1,24 @@
 apiVersion: nexus.contracts/v1
 kind: ToolContractSet
 contracts:
-  - name: account_lookup
-    input: {type: object}
-    output: {type: object}
+  - name: mock_accounts
+    actions: [list_eligible_balances, resolve_account]
     risk_tier: read_only
-  - name: internal_transfer
-    input: {type: object}
-    output: {type: object}
+  - name: mock_internal_transfer
+    actions: [submit]
     risk_tier: consequential
+    requires: [authorization, fresh_confirmation, idempotency_key]
+  - name: local_approved_knowledge
+    actions: [search]
+    risk_tier: informational
+    requires: [source_identity, result_limit]
+  - name: mock_approved_navigation
+    actions: [open_destination]
+    risk_tier: navigation
+  - name: mock_live_agent
+    actions: [create]
+    risk_tier: handoff
+    requires: [minimized_context]
+  - name: mock_member_profile
+    actions: [get]
+    risk_tier: read_only

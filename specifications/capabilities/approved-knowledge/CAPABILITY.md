@@ -10,7 +10,7 @@ archetype: declarative
 risk: informational
 implementation:
   skill: specifications/capabilities/approved-knowledge/SKILL.md
-  publishedSkill: skills/catalog/approved_knowledge/2.0.0/SKILL.md
+  publishedSkill: skills/catalog/approved_knowledge/2.1.0/SKILL.md
 ---
 
 # Approved knowledge answers

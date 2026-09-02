@@ -1,7 +1,21 @@
 apiVersion: nexus.contracts/v1
 kind: EventContractSet
 contracts:
-  - name: skill_gap
-    payload: {type: object}
-  - name: turn.completed
-    payload: {type: object}
+  - name: assistant-stream-event
+    required: [event_id, session_id, turn_id, sequence, type, created_at, final, metadata]
+    types:
+      - turn.accepted
+      - assistant.message
+      - assistant.request_input
+      - assistant.request_confirmation
+      - turn.completed
+      - turn.failed
+      - session.expired
+    invariants:
+      - Sequence is monotonic within one turn.
+      - A final event terminates the turn and can be replayed without re-execution.
+  - name: audit-event
+    required: [session_id, event_type, payload, created_at]
+    types: [skill_gap, provider_safety_intervention, confirmation_declined, tool_error, skill_result]
+    invariants:
+      - Audit history required by policy survives conversation expiry.

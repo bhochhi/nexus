@@ -1,0 +1,19 @@
+apiVersion: nexus.contracts/v1
+kind: TurnAnalysisContractSet
+contracts:
+  - name: provider-neutral-turn-analysis
+    version: 1
+    fields:
+      skill_matches: {type: array, item: SkillMatch}
+      skill_gap: {type: [object, 'null'], item: SkillGap}
+      slot_updates: {type: array, item: SlotUpdate}
+      conversation_act: {type: string}
+      active_goal_relation: {type: string}
+      sentiment: {type: string}
+      sentiment_confidence: {type: number, minimum: 0, maximum: 1}
+      safety_intervened: {type: boolean}
+      safety_response: {type: [string, 'null']}
+    invariants:
+      - Every match and slot update has bounded confidence.
+      - The platform validates all names, fields, values, and relations before state mutation.
+      - A safety intervention cannot be bypassed by another provider fallback.

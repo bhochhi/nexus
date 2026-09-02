@@ -24,6 +24,7 @@ def test_portable_specs_validate_without_loading_business_skill_artifacts():
     assert result["constitution"] == "specifications/constitution.md"
     assert "specifications/platform/features/conversation-lifecycle.md" in result["features"]
     assert "specifications/platform/features/capability-authoring-and-delivery.md" in result["features"]
+    assert "specifications/platform/foundations/01-conversation-orchestration.md" in result["foundations"]
     assert "specifications/capabilities/internal-transfer/CAPABILITY.md" in result["capabilities"]
 
 

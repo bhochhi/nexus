@@ -252,14 +252,23 @@ def validate(root: Path = PROJECT_ROOT) -> Dict[str, Any]:
     )
 
     adr_paths = sorted((root / "specifications" / "platform" / "adr").glob("*.md"))
+    foundation_paths = sorted(
+        (root / "specifications" / "platform" / "foundations").glob("*.md")
+    )
     feature_paths = sorted((root / "specifications" / "platform" / "features").glob("*.md"))
     capability_paths = sorted(
         (root / "specifications" / "capabilities").glob("*/CAPABILITY.md")
     )
     contract_paths = sorted((root / "specifications" / "contracts").glob("*.yaml"))
-    if not adr_paths or not feature_paths or not capability_paths or not contract_paths:
+    if (
+        not adr_paths
+        or not foundation_paths
+        or not feature_paths
+        or not capability_paths
+        or not contract_paths
+    ):
         raise SpecificationValidationError(
-            "portable ADR, feature, capability, and contract specifications are required"
+            "portable ADR, foundation, feature, capability, and contract specifications are required"
         )
     for path in adr_paths:
         decision, body = _load_markdown(path)
@@ -277,6 +286,25 @@ def validate(root: Path = PROJECT_ROOT) -> Dict[str, Any]:
                 "Consequences",
                 "Enforcement",
                 "Supersession",
+            ),
+            path,
+        )
+    for path in foundation_paths:
+        foundation, body = _load_markdown(path)
+        _require(foundation, ("apiVersion", "kind", "metadata", "interfaces"), path)
+        if foundation["kind"] != "PlatformFoundation":
+            raise SpecificationValidationError(
+                "{}: kind must be PlatformFoundation".format(path)
+            )
+        _require_headings(
+            body,
+            (
+                "Purpose",
+                "Responsibilities",
+                "Invariants",
+                "Interfaces",
+                "Failure behavior",
+                "Verification",
             ),
             path,
         )
@@ -451,6 +479,7 @@ def validate(root: Path = PROJECT_ROOT) -> Dict[str, Any]:
             str(path.relative_to(root)) for path in workflow_skill_paths
         ],
         "adrs": [str(path.relative_to(root)) for path in adr_paths],
+        "foundations": [str(path.relative_to(root)) for path in foundation_paths],
         "features": [str(path.relative_to(root)) for path in feature_paths],
         "capabilities": [
             str(path.relative_to(root)) for path in capability_paths

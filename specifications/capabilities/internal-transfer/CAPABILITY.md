@@ -10,7 +10,7 @@ archetype: deterministic
 risk: consequential
 implementation:
   skill: specifications/capabilities/internal-transfer/SKILL.md
-  publishedSkill: skills/catalog/internal_transfer/2.0.0/SKILL.md
+  publishedSkill: skills/catalog/internal_transfer/2.1.0/SKILL.md
 ---
 
 # Internal account transfer

@@ -10,7 +10,7 @@ archetype: human_handoff
 risk: handoff
 implementation:
   skill: specifications/capabilities/live-agent-handoff/SKILL.md
-  publishedSkill: skills/catalog/live_agent_handoff/3.0.0/SKILL.md
+  publishedSkill: skills/catalog/live_agent_handoff/3.1.0/SKILL.md
 ---
 
 # Live-agent handoff

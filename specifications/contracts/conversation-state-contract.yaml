@@ -1,0 +1,15 @@
+apiVersion: nexus.contracts/v1
+kind: ConversationStateContractSet
+contracts:
+  - name: durable-conversation-state
+    version: 1
+    task:
+      required: [id, skill_name, goal, status, inputs, completed_steps, skill_version, skill_artifact_hash]
+      optional: [resume_status, missing_field, pending_question, outcome, workflow_step, variables, context]
+    conversation:
+      required: [messages, active_task, queued_tasks, paused_tasks, turn_count]
+      pending: [pending_clarification, pending_goal_clarification, pending_handoff_offer, pending_task_transition]
+    invariants:
+      - An active or paused task identifies one exact immutable skill version and artifact hash.
+      - A confirmed task loses confirmation when a material input changes.
+      - Queued and paused tasks are distinct collections and transitions are explicit.

@@ -10,7 +10,7 @@ archetype: guided
 risk: read_only
 implementation:
   skill: specifications/capabilities/guided-balance/SKILL.md
-  publishedSkill: skills/catalog/guided_balance/2.1.0/SKILL.md
+  publishedSkill: skills/catalog/guided_balance/2.2.0/SKILL.md
 ---
 
 # Guided account balance
