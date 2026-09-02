@@ -2,6 +2,11 @@
 
 A small, runnable financial-services member-assistance proof of concept built with Python and LangGraph. It demonstrates a stable agent graph, dynamically discovered governed skills, deterministic controls, durable conversation state, and replaceable mock integrations. All members, accounts, transactions, URLs, cases, and knowledge in this repository are synthetic.
 
+> [!IMPORTANT]
+> This repository is a development proof of concept, not production financial
+> software. It has not been certified for handling real member data or executing
+> real financial transactions.
+
 An interactive, development-only code map is available in
 [`graphify-out/graph.html`](graphify-out/graph.html). See
 [`docs/graphify-demo.md`](docs/graphify-demo.md) for installation, queries, graph
@@ -647,3 +652,15 @@ observability/                local Langfuse v4 Docker Compose stack
   work queue. The live-agent skill still invokes a mock tool.
 - Authentication and authorizations are synthetic session flags. URLs, balances, transfer receipts, and handoff cases are mock values only.
 - Policy/audit coverage demonstrates control boundaries but does not claim production compliance, fraud controls, or regulated-advice support.
+
+## Open-source project
+
+Nexus is licensed under the [Apache License 2.0](LICENSE). Contributions are
+welcome under the process in [CONTRIBUTING.md](CONTRIBUTING.md). Report suspected
+vulnerabilities privately as described in [SECURITY.md](SECURITY.md), and follow
+the [Code of Conduct](CODE_OF_CONDUCT.md) when participating.
+
+Tagged GitHub releases are source releases. The repository is a Python
+application and is not published as an npm dependency. A standalone PyPI wheel
+is also not currently published because the runnable application depends on
+repository-level catalog, specification, data, and development assets.
