@@ -3,12 +3,12 @@ apiVersion: nexus.skills/v1
 kind: Skill
 metadata:
   name: live_agent_handoff
-  version: 3.1.0
+  version: 3.3.0
   owner: Contact Center Operations
   capability:
     id: CAP-LIVE-AGENT-HANDOFF
     specification: specifications/capabilities/live-agent-handoff/CAPABILITY.md
-    acceptance: [AC-HANDOFF-001, AC-HANDOFF-002, AC-HANDOFF-003, AC-HANDOFF-004, AC-HANDOFF-005, AC-HANDOFF-006]
+    acceptance: [AC-HANDOFF-001, AC-HANDOFF-002, AC-HANDOFF-003, AC-HANDOFF-004, AC-HANDOFF-005, AC-HANDOFF-006, AC-HANDOFF-007, AC-HANDOFF-008]
 intent:
   description: Collects a live-support reason, derives the right queue, and creates a minimized handoff.
   goals:
@@ -74,6 +74,8 @@ implementation:
   telemetry_events: [handoff_requested, handoff_queued]
   config:
     queues: [insurance, banking, advice]
+    summary_message_limit: 24
+    summary_paragraph_character_limit: 800
   workflow:
     version: 1
     steps:
@@ -119,5 +121,13 @@ Implements `CAP-LIVE-AGENT-HANDOFF`. After shared conversation policy enters the
 handoff flow, collect a concise reason, use only an approved queue, and transfer
 minimized context rather than the full transcript.
 
-This candidate preserves the published `3.0.0` execution behavior while adding
-explicit capability and acceptance traceability for its next release.
+The representative-facing summary retains deterministic `Goal`, `Reason`, and
+`Completed` fields. It may add one concise paragraph grounded only in the
+bounded transcript and structured task context. Greetings, confirmation and
+queue-selection logistics, invented causes or outcomes, and the full transcript
+are excluded. Summary-generation failure uses deterministic minimized copy and
+does not change the authoritative handoff result.
+
+This `3.3.0` candidate carries forward the published `3.2.0` behavior while
+adding explicit capability and acceptance traceability for a future release; it
+does not modify the immutable published artifact.

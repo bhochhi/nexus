@@ -10,7 +10,7 @@ archetype: human_handoff
 risk: handoff
 implementation:
   skill: specifications/capabilities/live-agent-handoff/SKILL.md
-  publishedSkill: skills/catalog/live_agent_handoff/3.1.0/SKILL.md
+  publishedSkill: skills/catalog/live_agent_handoff/3.2.0/SKILL.md
 ---
 
 # Live-agent handoff
@@ -26,6 +26,8 @@ making the member repeat unnecessary context.
 - Collect a concise support reason after shared policy establishes handoff intent.
 - Derive or ask for one of the approved insurance, banking, or advice queues.
 - Create a minimized case and place it in the approved queue.
+- Provide deterministic goal, reason, and completed-step fields plus one
+  bounded, grounded summary paragraph for the representative.
 - Exclude unrestricted transcript transfer and unsupported queue invention.
 
 ## Member scenarios
@@ -53,9 +55,14 @@ sensitive values and the full transcript are not transferred automatically.
 2. Collect a concise reason and approved queue.
 3. Derive a queue only when the reason clearly maps to an approved value.
 4. Create the case through the approved live-support tool.
-5. Transfer only allowed summary fields, active goal, and completed steps.
-6. Return the case identifier, queue, and authoritative waiting status.
-7. Once assigned, prevent automated replies from competing with the human chat.
+5. Transfer only allowed deterministic fields and a bounded transcript window.
+6. Generate at most one concise summary paragraph grounded only in that
+   transcript and structured task context; exclude greetings and handoff
+   logistics and never invent causes, facts, decisions, or outcomes.
+7. Preserve deterministic goal, reason, and completed-step fields and use a
+   deterministic minimized paragraph if generation is unavailable.
+8. Return the case identifier, queue, and authoritative waiting status.
+9. Once assigned, prevent automated replies from competing with the human chat.
 
 ## Acceptance criteria
 
@@ -71,6 +78,12 @@ sensitive values and the full transcript are not transferred automatically.
   not also route member messages through the virtual-assistant graph.
 - **AC-HANDOFF-006 — Failure behavior:** Unavailable or failed handoff follows an
   approved alternate-support response without inventing an assignment.
+- **AC-HANDOFF-007 — Grounded summary:** The optional generated paragraph uses
+  only the bounded transcript and structured task context, stays within its
+  configured limit, and contains no invented cause, fact, decision, or outcome.
+- **AC-HANDOFF-008 — Deterministic fallback:** If summary generation is
+  unavailable or invalid, the representative still receives deterministic
+  goal, reason, completed-step, and minimized fallback fields.
 
 ## Examples
 
@@ -88,6 +101,7 @@ representative is already connected.
 - Assignment occurs after a reconnect.
 - A representative ends the conversation and returns the member to automation.
 - Case creation succeeds but the response is delayed or duplicated.
+- The summary provider fails, returns unsupported claims, or exceeds its limit.
 
 ## Governance and integrations
 
@@ -95,10 +109,14 @@ representative is already connected.
 - Shared platform policy owns the confirmation or offer preceding the skill.
 - Approved integration: live-support queue and case service.
 - Transfer only minimized context; do not send a full transcript by default.
+- Summary generation is presentation support, not execution authority, and its
+  failure cannot block or falsify a successfully queued case.
 
 ## Verification
 
 - Deterministic tests cover queue derivation, clarification, waiting,
   assignment, cancellation, reconnect, and return to automation.
 - Privacy tests assert summary minimization.
+- Grounding and fallback tests assert bounded input, deterministic fields,
+  unsupported-claim rejection, and provider-unavailable behavior.
 - Concurrency tests assert a single active responder.
