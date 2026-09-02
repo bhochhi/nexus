@@ -25,7 +25,8 @@ but is not an application runtime dependency.
 - Typed mock adapters for member profile, knowledge, accounts, transfers, navigation, and live support.
 - A portable, spec-driven engineering workflow. Shared platform feature specs and
   machine-readable contracts live in `specifications/`; Codex, Copilot, and
-  Claude Code adapters in `workflow/adapters/` only point to that source.
+  Claude Code use thin root instruction files that point to the same portable
+  workflow and source specifications.
 
 ### Spec-driven development workflow
 
