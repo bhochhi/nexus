@@ -70,11 +70,23 @@ class MockHandoffTool:
         return "advice"
 
     def create(self, request: HandoffRequest) -> HandoffReceipt:
-        queue = self.derive_queue(request.reason, request.queue, request.active_goal)
-        summary = "Goal: {}. Completed: {}. Reason: {}.".format(
-            request.active_goal or "general assistance",
-            ", ".join(request.completed_steps) if request.completed_steps else "none",
-            request.reason,
+        reason = " ".join(request.reason.split())[:300]
+        active_goal = " ".join(request.active_goal.split())[:300]
+        goal = (
+            reason
+            if not active_goal or active_goal.casefold() == "general assistance"
+            else active_goal
+        )
+        completed_steps = [
+            " ".join(str(step).split())[:160]
+            for step in request.completed_steps[-6:]
+            if str(step).strip()
+        ]
+        queue = self.derive_queue(reason, request.queue, goal)
+        summary = "Goal: {}\nReason: {}\nCompleted: {}".format(
+            goal or "general assistance",
+            reason or "member requested live support",
+            ", ".join(completed_steps) if completed_steps else "none",
         )
         digest = hashlib.sha256(summary.encode("utf-8")).hexdigest()[:8].upper()
         return HandoffReceipt(

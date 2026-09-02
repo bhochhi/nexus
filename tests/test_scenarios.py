@@ -707,6 +707,23 @@ def test_live_agent_handoff_reuses_context_provided_before_confirmation(runtime_
     assert queued.outcome["queue"] == "insurance"
 
 
+def test_live_agent_handoff_uses_readable_prior_goal_and_completed_work(runtime_factory):
+    runtime = runtime_factory()
+
+    runtime.chat("handoff-progress", "Transfer $50 from chk-001 to sav-001")
+    runtime.chat("handoff-progress", "get me a person")
+    runtime.chat("handoff-progress", "yes")
+    runtime.chat("handoff-progress", "I need help finishing this transfer")
+    queued = runtime.chat("handoff-progress", "banking")
+
+    assert queued.outcome["summary"].startswith(
+        "Goal: make an internal transfer\n"
+        "Reason: I need help finishing this transfer\nCompleted: "
+    )
+    assert "collected transfer amount" in queued.outcome["summary"]
+    assert "presented transfer review" in queued.outcome["summary"]
+
+
 def test_repeated_negative_sentiment_offers_live_support(runtime_factory):
     runtime = runtime_factory()
 

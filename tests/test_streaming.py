@@ -4,7 +4,76 @@ import pytest
 from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 
+from member_assistant.providers import (
+    DeterministicProvider,
+    SkillMatch,
+    TurnAnalysis,
+)
 from member_assistant.server import SESSION_EXPIRED_CLOSE_CODE, create_app
+
+
+class _SemanticLiveAgentProvider(DeterministicProvider):
+    """Reproduces a model-selected handoff without deterministic matches."""
+
+    semantic_turn_understanding = True
+
+    def understand_turn(self, message, catalog, context=None):
+        if "connect me to live agent" in message.casefold():
+            return TurnAnalysis(
+                skill_matches=[
+                    SkillMatch(
+                        skill_name="live_agent_handoff",
+                        confidence=0.99,
+                        inputs={"reason": message},
+                    )
+                ],
+                sentiment="negative",
+                sentiment_confidence=0.91,
+            )
+        return super().understand_turn(message, catalog, context)
+
+
+def test_semantic_live_agent_match_offers_handoff_on_first_request(runtime_factory):
+    runtime = runtime_factory(provider=_SemanticLiveAgentProvider())
+
+    events = list(
+        runtime.stream_chat(
+            "semantic-handoff",
+            "thanks... i see my money is not current.. please connect me to live agent",
+            client_message_id="semantic-handoff-message-1",
+        )
+    )
+
+    assert [event.type for event in events] == [
+        "turn.accepted",
+        "handoff.offered",
+        "turn.completed",
+    ]
+    assert "Would you like me to connect" in events[1].content
+    assert runtime.inspect_state("semantic-handoff")["pending_handoff_offer"]
+
+
+def test_finalized_fallback_is_always_emitted_to_the_member(
+    runtime_factory, monkeypatch
+):
+    runtime = runtime_factory()
+    monkeypatch.setattr(runtime, "_unmatched_reception_response", lambda *_: "")
+
+    events = list(
+        runtime.stream_chat(
+            "visible-fallback",
+            "an unmatched request",
+            client_message_id="visible-fallback-message-1",
+        )
+    )
+
+    assert [event.type for event in events] == [
+        "turn.accepted",
+        "assistant.message",
+        "turn.completed",
+    ]
+    assert "I wasn't able to produce a safe response." in events[1].content
+    assert events[-1].metadata["reply"] == events[1].content
 
 
 def test_runtime_streams_semantic_multi_goal_messages_and_persists_replay(

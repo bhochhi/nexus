@@ -235,6 +235,7 @@ class AgentRuntime:
                     }
                     result: Optional[WorkflowState] = None
                     emitted_part_count = 0
+                    emitted_message_count = 0
                     for snapshot in self.graph.stream(
                         initial_state, stream_mode="values"
                     ):
@@ -256,6 +257,7 @@ class AgentRuntime:
                                 is_first=part_index == 0,
                             )
                             active_task = snapshot["conversation"].get("active_task")
+                            emitted_message_count += 1
                             yield new_event(
                                 event_type,
                                 content=content,
@@ -272,6 +274,26 @@ class AgentRuntime:
                     if result is None or "reply" not in result:
                         raise RuntimeError("graph did not produce a final state")
                     final_conversation = result["conversation"]
+                    final_reply = str(result["reply"]).strip()
+                    if not emitted_message_count and final_reply:
+                        event_type, message_kind = self._stream_message_type(
+                            final_conversation,
+                            is_latest=True,
+                        )
+                        active_task = final_conversation.get("active_task")
+                        yield new_event(
+                            event_type,
+                            content=final_reply,
+                            metadata={
+                                "message_kind": message_kind,
+                                "selected_skill": final_conversation.get(
+                                    "selected_skill"
+                                ),
+                                "task_id": active_task.get("id")
+                                if active_task
+                                else None,
+                            },
+                        )
                     self._persist_turn(session_id, result)
                     final_metadata = {
                         "client_message_id": client_message_id,
@@ -564,28 +586,84 @@ class AgentRuntime:
             )
         return event.as_dict()
 
-    def handoff_summary(self, session_id: str, reason: str) -> str:
-        """Build minimized recent context for the assigned MSR."""
+    def handoff_summary(
+        self,
+        session_id: str,
+        reason: str,
+        structured_summary: str = "",
+    ) -> str:
+        """Build structured fields plus one grounded paragraph for the assigned MSR."""
 
         conversation = self.store.load(session_id)
-        active = conversation.get("active_task")
-        lines = ["Reason: {}.".format(" ".join(reason.split())[:300])]
-        if active:
-            lines.append("Active goal: {}.".format(active.get("goal", "general assistance")))
-            completed = active.get("completed_steps", [])
-            if completed:
-                lines.append("Completed: {}.".format(", ".join(completed[-4:])))
-        recent = conversation.get("messages", [])[-6:]
-        if recent:
-            context = " | ".join(
-                "{}: {}".format(
-                    "Member" if item.get("role") == "user" else "Assistant",
-                    " ".join(str(item.get("content", "")).split())[:220],
-                )
-                for item in recent
+        transcript = [
+            {
+                "role": "member" if item.get("role") == "user" else "assistant",
+                "content": " ".join(str(item.get("content", "")).split())[:500],
+            }
+            for item in conversation.get("messages", [])[-24:]
+            if item.get("role") in {"user", "assistant"}
+            and str(item.get("content", "")).strip()
+        ]
+        clean_reason = " ".join(reason.split())[:300] or "member requested live support"
+        fields = "\n".join(
+            " ".join(line.split())
+            for line in structured_summary.splitlines()
+            if line.strip()
+        )[:1200]
+        if not fields:
+            fields = "Goal: {0}\nReason: {0}\nCompleted: none".format(clean_reason)
+
+        fallback_paragraph = (
+            "The member is requesting help with {} No additional completed actions "
+            "or outcomes were recorded for the handoff."
+        ).format(clean_reason.rstrip(".") + ".")
+        facts = {
+            "structured_handoff": fields,
+            "reason": clean_reason,
+            "transcript": transcript,
+            # The deterministic provider renders this safe availability fallback.
+            "template": fallback_paragraph,
+        }
+        instruction = (
+            "Write one concise paragraph for a human support representative summarizing "
+            "the member's discussion. Use only the supplied transcript and structured "
+            "handoff facts. State the issue, relevant context already discussed, what the "
+            "assistant completed or explained, and what remains unresolved when those facts "
+            "are present. Ignore greetings, yes/no handoff confirmation, queue-selection "
+            "logistics, and the final connection notice. Do not invent facts, decisions, "
+            "causes, or outcomes. Do not repeat the Goal, Reason, or Completed labels. Return "
+            "one plain-text paragraph of two to four sentences and at most 800 characters."
+        )
+        with self.observability.observe(
+            "llm.handoff_summary",
+            "generation",
+            input_value=self.observability.content(
+                facts,
+                {
+                    "transcript_message_count": len(transcript),
+                    "content_redacted": True,
+                },
+            ),
+            metadata=self.provider.observability_metadata(),
+        ) as observation:
+            fallback_used = False
+            try:
+                paragraph = self.provider.generate_response(instruction, facts)
+            except Exception:
+                fallback_used = True
+                paragraph = fallback_paragraph
+            paragraph = " ".join(str(paragraph).split())
+            if paragraph.casefold().startswith("summary:"):
+                paragraph = paragraph.split(":", 1)[1].strip()
+            paragraph = paragraph[:800].rstrip() or fallback_paragraph
+            observation.update(
+                output={"summary_length": len(paragraph)},
+                metadata={
+                    **self.provider.observability_metadata(),
+                    "fallback_used": fallback_used,
+                },
             )
-            lines.append("Recent context: {}".format(context))
-        return " ".join(lines)[:1800]
+        return "{}\n\nSummary: {}".format(fields, paragraph)[:2200]
 
     def close(self) -> None:
         self.catalog.stop()
@@ -1077,9 +1155,15 @@ class AgentRuntime:
             goals = resolved
             updates["goals"] = goals
 
-        handoff_requested = any(
-            self._is_handoff_goal(goal, catalog) for goal in deterministic_goals
-        )
+        # Handoff is a governed catalog goal, not a deterministic-only route.
+        # A semantic provider's accepted match must trigger the same consent
+        # boundary as an offline deterministic match.
+        handoff_candidates = [
+            goal
+            for goal in goals + deterministic_goals
+            if self._is_handoff_goal(goal, catalog)
+        ]
+        handoff_requested = bool(handoff_candidates)
         sentiment_escalation = (
             conversation.get("sentiment") == "frustrated"
             or int(conversation.get("negative_sentiment_streak", 0)) >= 2
@@ -1092,9 +1176,8 @@ class AgentRuntime:
             handoff_inputs = next(
                 (
                     goal.get("inputs", {})
-                    for goal in deterministic_goals
-                    if self._is_handoff_goal(goal, catalog)
-                    and goal.get("inputs", {}).get("queue")
+                    for goal in handoff_candidates
+                    if goal.get("inputs", {}).get("queue")
                 ),
                 {},
             )
@@ -1447,7 +1530,7 @@ class AgentRuntime:
             handoff_goal["context"] = {
                 "prior_task": {
                     "goal": (
-                        active_context.get("goal", "general assistance")
+                        self._task_label(active_context)
                         if active_context
                         else "general assistance"
                     ),
@@ -2339,8 +2422,8 @@ class AgentRuntime:
         )
         return updates
 
-    @staticmethod
     def _new_handoff_offer(
+        self,
         conversation: ConversationState,
         reason: str,
         inputs: Optional[Dict[str, Any]] = None,
@@ -2359,9 +2442,7 @@ class AgentRuntime:
         )
         return {
             "reason": reason,
-            "active_goal": active.get("goal", "general assistance")
-            if active
-            else "general assistance",
+            "active_goal": self._task_label(active) if active else "general assistance",
             "completed_steps": list(active.get("completed_steps", [])) if active else [],
             "inputs": dict(inputs or {}),
             "question": question,

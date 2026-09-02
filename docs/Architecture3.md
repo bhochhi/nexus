@@ -788,7 +788,7 @@ flowchart LR
 | Template-only | Transfer confirmation | Deterministic template, no free-form generation. |
 | Template-only | Balance response | Controlled template populated only by authorized tool results. |
 | Grounded answer | FAQ | Render only from approved retrieved knowledge; retain source/disclosure. |
-| Handoff summary | Live agent | Structured case/context summary. |
+| Handoff summary | Live agent | Deterministic Goal, Reason, and Completed fields plus one model-generated paragraph grounded only in bounded transcript and task context; use a deterministic fallback when generation is unavailable. |
 | Default fallback | Unsupported/general | Controlled lane-setting copy; no answer from model memory. |
 
 The current POC uses the first, grounded-answer, handoff-summary, and default
@@ -807,7 +807,9 @@ Live-agent handoff is a first-class skill and platform mode.
 - Member may request a human at any point.
 - Policy may force handoff.
 - Repeated low-confidence clarification may trigger handoff.
-- Current session, tasks, facts, tool outcomes, and transcript summary must be passed to the agent.
+- Current session, tasks, facts, tool outcomes, and a minimized transcript summary must be passed to the agent.
+- The agent-facing summary must retain deterministic `Goal`, `Reason`, and `Completed` fields, followed by one concise paragraph grounded only in bounded transcript and task context.
+- Summary generation must ignore handoff logistics, must not invent causes or outcomes, and must fall back to deterministic copy when the configured model is unavailable.
 - WebSocket transport must support member and agent clients.
 - The bot should stop autonomous execution once human-agent mode is active unless explicitly configured for assistive mode.
 

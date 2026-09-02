@@ -84,3 +84,14 @@ Older context could then be retrieved by task and evidence rather than replaying
 the complete transcript. The recent-message limit should eventually become a
 configuration value and be evaluated with conversation-length, cross-goal
 contamination, recovery, latency, token-use, and privacy tests.
+
+## Live-agent handoff summary
+
+Handoff is a distinct, consented context-transfer boundary. The POC supplies a
+bounded window of up to 24 recent member and assistant messages to a grounded
+summary call once the handoff is queued. The human-facing result keeps
+deterministic `Goal`, `Reason`, and `Completed` fields and adds one concise
+paragraph describing only relevant discussion, completed actions, and unresolved
+needs supported by that transcript and task state. Greetings and handoff-routing
+logistics are excluded by instruction, and a deterministic minimized paragraph is
+used if generation is unavailable.

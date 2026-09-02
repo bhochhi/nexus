@@ -138,6 +138,12 @@ def create_app(
                 and outcome.get("queue")
             ):
                 reason = str(outcome.get("reason") or "member requested live support")
+                summary = await asyncio.to_thread(
+                    active_runtime.handoff_summary,
+                    session_id,
+                    reason,
+                    str(outcome.get("summary") or ""),
+                )
                 await live_broker.enqueue(
                     case_id=str(outcome["case_id"]),
                     session_id=session_id,
@@ -148,7 +154,7 @@ def create_app(
                     ),
                     queue=str(outcome["queue"]),
                     reason=reason,
-                    summary=active_runtime.handoff_summary(session_id, reason),
+                    summary=summary,
                     sentiment=str(state.get("sentiment", "unknown")),
                     sentiment_confidence=float(
                         state.get("sentiment_confidence", 0.0)

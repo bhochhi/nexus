@@ -206,7 +206,9 @@ def console() -> None:
             st.caption("Member ID · {}  |  Case · {}".format(case.get("session_id"), case.get("case_id")))
             st.markdown(
                 '<div class="summary"><b>System message · Summary</b><br>{}</div>'.format(
-                    html.escape(str(case.get("summary", "No summary available.")))
+                    html.escape(
+                        str(case.get("summary", "No summary available."))
+                    ).replace("\n", "<br>")
                 ),
                 unsafe_allow_html=True,
             )

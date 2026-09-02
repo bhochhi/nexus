@@ -2,7 +2,28 @@ import uuid
 
 from fastapi.testclient import TestClient
 
+from member_assistant.providers import DeterministicProvider
 from member_assistant.server import create_app
+
+
+class _GroundedHandoffSummaryProvider(DeterministicProvider):
+    def generate_response(self, instruction, facts):
+        if "human support representative" not in instruction:
+            return super().generate_response(instruction, facts)
+        transcript = facts["transcript"]
+        assert any(
+            item["content"] == "This is not helping, I want a person"
+            for item in transcript
+        )
+        assert any(
+            item["content"] == "My credit card balance is wrong"
+            for item in transcript
+        )
+        return (
+            "The member reports that their credit-card balance is wrong and asked "
+            "for a person after the automated assistance was not helping. The issue "
+            "remains unresolved and needs review by banking support."
+        )
 
 
 def _receive_until(websocket, event_type, limit=50):
@@ -38,7 +59,7 @@ def _queue_banking_handoff(member):
 def test_live_support_assigns_routes_messages_updates_sentiment_and_ends(
     runtime_factory,
 ):
-    runtime = runtime_factory()
+    runtime = runtime_factory(provider=_GroundedHandoffSummaryProvider())
     app = create_app(runtime, close_runtime=False)
 
     with TestClient(app) as client:
@@ -69,9 +90,18 @@ def test_live_support_assigns_routes_messages_updates_sentiment_and_ends(
                 assert case["queue"] == "banking"
                 assert case["agent_name"] == "Morgan"
                 assert case["member_name"] == "Jordan Lee"
-                assert assigned_agent["system_message"].startswith(
-                    "[System message: Summary]"
+                assert case["summary"] == (
+                    "Goal: My credit card balance is wrong\n"
+                    "Reason: My credit card balance is wrong\nCompleted: none\n\n"
+                    "Summary: The member reports that their credit-card balance is "
+                    "wrong and asked for a person after the automated assistance was "
+                    "not helping. The issue remains unresolved and needs review by "
+                    "banking support."
                 )
+                assert assigned_agent["system_message"] == (
+                    "[System message: Summary] {}".format(case["summary"])
+                )
+                assert "Recent context:" not in assigned_agent["system_message"]
 
                 member.send_json(
                     {

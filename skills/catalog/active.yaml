@@ -1,5 +1,5 @@
 apiVersion: nexus.catalog/v1
-revision: 29
+revision: 30
 skills:
   approved_knowledge:
     version: 2.1.0
@@ -210,13 +210,13 @@ skills:
           pattern: \bfrom\s+([a-z0-9-]+)(?:\s+account)?\s+to\s+([a-z0-9-]+)
           group: 2
   live_agent_handoff:
-    version: 3.1.0
-    artifact_hash: d0ca68acdeba7c6b6221f8803827d0ea436422542f081ddea7cc4bc7f39ef0b4
-    artifact: live_agent_handoff/3.1.0/SKILL.md
+    version: 3.2.0
+    artifact_hash: 4f88986ba2b3d93e85b6a3ad9f7a97caca0c8c6cd0a9ecca74da2029d75be685
+    artifact: live_agent_handoff/3.2.0/SKILL.md
     routing:
       name: live_agent_handoff
-      version: 3.1.0
-      artifact_hash: d0ca68acdeba7c6b6221f8803827d0ea436422542f081ddea7cc4bc7f39ef0b4
+      version: 3.2.0
+      artifact_hash: 4f88986ba2b3d93e85b6a3ad9f7a97caca0c8c6cd0a9ecca74da2029d75be685
       archetype: human_handoff
       display_name: speak with a live agent
       description: Connects a member with a live support representative by collecting
