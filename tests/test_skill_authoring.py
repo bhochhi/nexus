@@ -6,6 +6,7 @@ import yaml
 
 from member_assistant.catalog import CatalogValidationError, SkillCatalog
 from member_assistant.config import PROJECT_ROOT
+from member_assistant.providers import DeterministicProvider
 from member_assistant.skill_authoring import FileSkillPublisher, SkillMarkdownCompiler
 
 
@@ -186,7 +187,7 @@ def test_publication_is_immutable_idempotent_and_rollbackable(tmp_path):
 
     next_source = tmp_path / "next.md"
     next_source.write_text(
-        ONLINE_ID.read_text(encoding="utf-8").replace("3.0.1", "3.1.0", 1),
+        ONLINE_ID.read_text(encoding="utf-8").replace("3.0.0", "3.1.0", 1),
         encoding="utf-8",
     )
     next_receipt = publisher.publish(compiler.compile(next_source))
@@ -222,11 +223,103 @@ def test_catalog_loads_routing_metadata_before_full_artifact(tmp_path):
     catalog = SkillCatalog(tmp_path / "catalog")
 
     assert catalog.routes()[0].name == "online_id_recovery"
+    assert catalog.routes()[0].sample_utterances
     assert catalog._versions == {}
     definition = catalog.get("online_id_recovery")
     assert definition is not None
     assert definition.artifact_hash == compiled.definition.artifact_hash
     assert len(catalog._versions) == 1
+
+
+def test_v2_requires_structured_first_class_sample_utterances(tmp_path):
+    source = tmp_path / "SKILL.md"
+    source.write_text(
+        ONLINE_ID.read_text(encoding="utf-8")
+        .replace("nexus.skills/v1", "nexus.skills/v2", 1)
+        .replace("  goals:\n", "  sample_utterances: []\n  goals:\n", 1),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CatalogValidationError, match="between 2 and 8"):
+        SkillMarkdownCompiler().compile(source)
+
+
+def test_v3_separates_discovery_activation_and_execution_contracts():
+    source = (
+        PROJECT_ROOT
+        / "skills"
+        / "catalog"
+        / "internal_transfer"
+        / "2.1.0"
+        / "SKILL.md"
+    )
+    compiled = SkillMarkdownCompiler().compile(source)
+    routing = compiled.routing.as_dict()
+
+    assert routing["sample_utterances"]
+    assert "activation_instructions" not in routing
+    assert "## Inputs and interpretation" in compiled.definition.activation_instructions
+    assert "mock_internal_transfer" in compiled.definition.allowed_tools
+    assert "mock_internal_transfer" not in compiled.definition.activation_instructions
+
+
+def test_v3_activation_instructions_are_supplied_only_for_active_task(runtime_factory):
+    class ContextCaptureProvider(DeterministicProvider):
+        semantic_turn_understanding = True
+
+        def __init__(self):
+            super().__init__()
+            self.contexts = []
+
+        def understand_turn(self, message, catalog, context=None):
+            self.contexts.append(dict(context or {}))
+            return super().understand_turn(message, catalog, context)
+
+    provider = ContextCaptureProvider()
+    runtime = runtime_factory(provider=provider)
+
+    runtime.chat("v2-activation", "I want to make a transfer")
+    assert provider.contexts[-1]["active_skill_instructions"] == ""
+
+    runtime.chat("v2-activation", "savings 2003")
+    instructions = provider.contexts[-1]["active_skill_instructions"]
+    assert "## Inputs and interpretation" in instructions
+    assert "mock_internal_transfer" not in instructions
+
+
+def test_canonical_v3_template_compiles_with_declared_tool_contract():
+    template = PROJECT_ROOT / "skills" / "templates" / "SKILL.template.md"
+
+    compiled = SkillMarkdownCompiler().compile(
+        template,
+        {
+            "approved_tool": (
+                "read_only_preflight",
+                "perform_read_only_action",
+            )
+        },
+    )
+
+    assert compiled.definition.api_version == "nexus.skills/v3"
+    assert compiled.definition.supported_goals[0]["name"] == compiled.definition.name
+    assert compiled.definition.sample_utterances
+    assert compiled.definition.workflow["steps"][0]["op"] == "call_tool"
+
+
+def test_v3_rejects_multi_goal_authoring_until_complete_contract_is_supported(tmp_path):
+    template = PROJECT_ROOT / "skills" / "templates" / "SKILL.template.md"
+    source = tmp_path / "SKILL.md"
+    source.write_text(
+        template.read_text(encoding="utf-8").replace(
+            "metadata:\n",
+            "goals:\n  - name: unsupported_second_goal\nmetadata:\n",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CatalogValidationError, match="multi-goal skills are not supported"):
+        SkillMarkdownCompiler().compile(source)
 
 
 def test_paused_task_resumes_with_pinned_version_after_publish_and_restart(

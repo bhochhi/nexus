@@ -1,27 +1,31 @@
 ---
-apiVersion: nexus.skills/v1
-kind: Skill
+schema_version: nexus.skills/v3
+name: guided_balance
+version: 2.2.0
+display_name: check an account balance
+description: Retrieves available balances for eligible checking or savings accounts owned by the authenticated member. Use when the member asks how much money is available or requests an account balance; do not use to transfer money, explain policy, or discuss an unsupported external account.
+examples:
+  - What is my balance?
+  - How much do I have in checking?
+  - Show me the balance for savings 2003.
+  - How much money is available in account 1002?
 metadata:
-  name: guided_balance
-  version: 2.1.0
   owner: Deposit Servicing
-intent:
-  description: Retrieves authorized mock account balances using account type and account-number selection when needed.
-  goals:
-    - name: check_account_balance
-      display_name: check an account balance
-      keywords: [balance, how much money, how much I have, available funds]
-      examples:
-        - What is my balance?
-        - How much is in checking?
-  input_schema:
-    type: object
-    properties:
-      account_type:
-        type: string
-        enum: [checking, savings]
-      account_number:
-        type: string
+  domain: banking
+  category: deposit-servicing
+  tags: [authenticated, read-only]
+input_schema:
+  type: object
+  properties:
+    account_type:
+      type: string
+      enum: [checking, savings]
+      description: The member-stated account type. It narrows eligible accounts but does not uniquely identify one when several accounts share that type.
+    account_number:
+      type: string
+      description: The account identifier or last four digits the member selected; do not infer it merely from account type.
+fallback:
+  routing_hints: [balance, how much money, how much I have, available funds]
   input_extraction:
     account_type:
       strategy: alias
@@ -115,14 +119,30 @@ acceptance:
     utterance: What is my balance?
     expect:
       skill: guided_balance
-      goal: check_account_balance
       outcome: retrieved
 ---
 
 # Guided balance
 
-Retrieve only accounts eligible for the authenticated mock member. Display all
-eligible balances when the member has two or fewer accounts. For a larger
-portfolio, collect account type first, then collect the account number only
-when there are multiple eligible accounts of that type. A member can correct a
-selected account type at any time before the balance is returned.
+## When to use
+
+Use this skill when the member wants an available balance for an eligible
+checking or savings account. A request to move money is a separate objective.
+
+## Inputs and interpretation
+
+`account_type` narrows the eligible account collection. `account_number`
+identifies a particular account by identifier or last four digits. If several
+eligible accounts have the stated type, the type alone is not a complete
+selection and the member must choose from the runtime-provided account labels.
+
+## Conversation behavior
+
+Accept an account type, an account number, or both in one turn. Apply explicit
+corrections before returning a balance. Ask only for information that remains
+ambiguous after the eligible-account lookup.
+
+## Safety and boundaries
+
+The runtime performs the authorization check, eligible-account lookup, account
+resolution, and response grounding. Never invent an account or balance.

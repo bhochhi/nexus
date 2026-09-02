@@ -19,10 +19,13 @@ intent:
     properties:
       source_account:
         type: string
+        description: The eligible member account the money should come from; use the member's stated account type, identifier, or last four digits.
       destination_account:
         type: string
+        description: The eligible member account that should receive the money; use the member's stated account type, identifier, or last four digits.
       amount:
         type: string
+        description: The monetary amount to transfer; an account identifier or last-four value is not an amount unless the member describes it as money.
         pattern: '^[0-9]+(\.[0-9]{1,2})?$'
   input_extraction:
     amount:

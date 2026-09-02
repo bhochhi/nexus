@@ -73,7 +73,9 @@ class SkillRoutingDefinition:
     version: str
     artifact_hash: str
     archetype: str
+    display_name: str
     description: str
+    sample_utterances: Tuple[Mapping[str, str], ...]
     owner: str
     risk_tier: str
     interaction: str
@@ -90,7 +92,9 @@ class SkillRoutingDefinition:
             version=str(value["version"]),
             artifact_hash=str(value["artifact_hash"]),
             archetype=str(value["archetype"]),
+            display_name=str(value.get("display_name", value["name"])),
             description=str(value["description"]),
+            sample_utterances=tuple(value.get("sample_utterances", [])),
             owner=str(value["owner"]),
             risk_tier=str(value["risk_tier"]),
             interaction=str(value["interaction"]),
@@ -110,13 +114,16 @@ class SkillDefinition:
     name: str
     version: str
     archetype: str
+    display_name: str
     description: str
+    sample_utterances: Tuple[Mapping[str, str], ...]
     owner: str
     risk_tier: str
     supported_goals: Tuple[Mapping[str, Any], ...]
     input_schema: Mapping[str, Any]
     allowed_tools: Tuple[str, ...]
     response_template: str
+    metadata: Mapping[str, Any] = field(default_factory=dict)
     auth_required: bool = False
     required_authorization: Optional[str] = None
     confirmation_required: bool = False
@@ -126,6 +133,7 @@ class SkillDefinition:
     config: Mapping[str, Any] = field(default_factory=dict)
     input_extraction: Mapping[str, Any] = field(default_factory=dict)
     workflow: Mapping[str, Any] = field(default_factory=dict)
+    activation_instructions: str = ""
     api_version: str = "nexus.skills/v1"
     interaction: str = "guided"
     execution: str = "workflow"
@@ -169,6 +177,13 @@ class SkillDefinition:
             raise CatalogValidationError(
                 "{}: description and owner must be non-empty".format(source.name)
             )
+        api_version = str(value.get("apiVersion", "nexus.skills/v1"))
+        if api_version in {"nexus.skills/v2", "nexus.skills/v3"} and len(
+            str(value["description"])
+        ) > 1024:
+            raise CatalogValidationError(
+                "{}: description must be at most 1024 characters".format(source.name)
+            )
         if value["risk_tier"] not in RISK_TIERS:
             raise CatalogValidationError("{}: unsupported risk_tier".format(source.name))
         archetype = str(value["archetype"])
@@ -196,6 +211,89 @@ class SkillDefinition:
             raise CatalogValidationError(
                 "{}: goal names must be unique".format(source.name)
             )
+        if api_version == "nexus.skills/v3" and goal_names != [str(value["name"])]:
+            raise CatalogValidationError(
+                "{}: v3 single-goal identity must be derived from the skill name".format(
+                    source.name
+                )
+            )
+        display_name = str(
+            value.get("display_name")
+            or goals[0].get("display_name")
+            or str(value["name"]).replace("_", " ")
+        ).strip()
+        if not display_name:
+            raise CatalogValidationError(
+                "{}: display_name must be a non-empty string".format(source.name)
+            )
+        samples = value.get("sample_utterances", [])
+        if not samples and api_version == "nexus.skills/v1":
+            # v1 kept examples inside each goal. Normalize them for callers while
+            # preserving compatibility with immutable v1 artifacts.
+            samples = [
+                {"utterance": str(utterance), "goal": str(goal["name"])}
+                for goal in goals
+                for utterance in goal.get("examples", [])
+            ]
+        if not isinstance(samples, list):
+            raise CatalogValidationError(
+                "{}: sample_utterances must be a list".format(source.name)
+            )
+        if api_version in {"nexus.skills/v2", "nexus.skills/v3"} and not 2 <= len(samples) <= 8:
+            raise CatalogValidationError(
+                "{}: {} examples must contain between 2 and 8 items".format(
+                    source.name, api_version
+                )
+            )
+        normalized_samples = []
+        seen_sample_utterances = set()
+        for index, sample in enumerate(samples):
+            if not isinstance(sample, dict):
+                raise CatalogValidationError(
+                    "{}: sample_utterances item {} must be an object".format(
+                        source.name, index
+                    )
+                )
+            utterance = " ".join(str(sample.get("utterance", "")).split())
+            goal_name = str(sample.get("goal", "")).strip()
+            if not utterance or len(utterance) > 200:
+                raise CatalogValidationError(
+                    "{}: sample_utterances item {} needs an utterance of at most 200 characters".format(
+                        source.name, index
+                    )
+                )
+            if goal_name not in goal_names:
+                raise CatalogValidationError(
+                    "{}: sample_utterances item {} references an undeclared goal".format(
+                        source.name, index
+                    )
+                )
+            sample_key = utterance.casefold()
+            if sample_key in seen_sample_utterances:
+                raise CatalogValidationError(
+                    "{}: sample_utterances must be unique".format(source.name)
+                )
+            seen_sample_utterances.add(sample_key)
+            normalized_samples.append({"utterance": utterance, "goal": goal_name})
+        activation_instructions = str(value.get("documentation", "")).strip()
+        if api_version in {"nexus.skills/v2", "nexus.skills/v3"}:
+            required_headings = (
+                "## When to use",
+                "## Inputs and interpretation",
+                "## Conversation behavior",
+                "## Safety and boundaries",
+            )
+            missing_headings = [
+                heading
+                for heading in required_headings
+                if heading not in activation_instructions
+            ]
+            if missing_headings:
+                raise CatalogValidationError(
+                    "{}: v2 Markdown body is missing {}".format(
+                        source.name, ", ".join(missing_headings)
+                    )
+                )
         if not isinstance(value["input_schema"], dict):
             raise CatalogValidationError("{}: input_schema must be an object".format(source.name))
         if not isinstance(value["input_schema"].get("properties", {}), dict):
@@ -334,13 +432,16 @@ class SkillDefinition:
             name=value["name"].strip(),
             version=str(value["version"]),
             archetype=archetype,
+            display_name=display_name,
             description=str(value["description"]),
+            sample_utterances=tuple(normalized_samples),
             owner=str(value["owner"]),
             risk_tier=str(value["risk_tier"]),
             supported_goals=tuple(goals),
             input_schema=value["input_schema"],
             allowed_tools=tuple(str(tool) for tool in value["allowed_tools"]),
             response_template=str(value["response_template"]),
+            metadata=value.get("metadata", {}),
             auth_required=bool(value.get("auth_required", False)),
             required_authorization=value.get("required_authorization"),
             confirmation_required=bool(value.get("confirmation_required", False)),
@@ -350,7 +451,8 @@ class SkillDefinition:
             config=value.get("config", {}),
             input_extraction=extraction,
             workflow=workflow,
-            api_version=str(value.get("apiVersion", "nexus.skills/v1")),
+            activation_instructions=activation_instructions,
+            api_version=api_version,
             interaction=str(behavior.get("interaction", default_interaction)),
             execution=str(behavior.get("execution", default_execution)),
             lifecycle=str(behavior.get("lifecycle", default_lifecycle)),
@@ -366,7 +468,9 @@ class SkillDefinition:
             version=self.version,
             artifact_hash=self.artifact_hash,
             archetype=self.archetype,
+            display_name=self.display_name,
             description=self.description,
+            sample_utterances=self.sample_utterances,
             owner=self.owner,
             risk_tier=self.risk_tier,
             interaction=self.interaction,

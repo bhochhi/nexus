@@ -5,7 +5,7 @@ import re
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from member_assistant.catalog import SkillRoutingDefinition
-from .base import GoalMatch, ModelProvider, ProviderError, TurnAnalysis
+from .base import SkillMatch, ModelProvider, ProviderError, TurnAnalysis
 from .turn_contract import (
     TURN_UNDERSTANDING_INSTRUCTION,
     parse_turn_analysis,
@@ -14,6 +14,8 @@ from .turn_contract import (
 
 
 class OpenAIProvider(ModelProvider):
+    semantic_turn_understanding = True
+
     def __init__(self, model_id: str, api_key: str, reasoning_effort: str = "low"):
         if not api_key:
             raise ProviderError("OPENAI_API_KEY or MODEL_API_KEY is not configured")
@@ -32,6 +34,7 @@ class OpenAIProvider(ModelProvider):
             "api_endpoint": "responses",
             "reasoning_effort": self._effective_reasoning_effort(),
             "fallback_used": False,
+            "understanding_mode": "semantic",
         }
 
     def observability_metadata(self) -> Dict[str, Any]:
@@ -46,6 +49,7 @@ class OpenAIProvider(ModelProvider):
             "api_endpoint": "responses",
             "reasoning_effort": self._effective_reasoning_effort(),
             "fallback_used": False,
+            "understanding_mode": "semantic",
         }
         if usage is not None:
             self._last_call_metadata.update(
@@ -100,13 +104,13 @@ class OpenAIProvider(ModelProvider):
             detail=detail or None,
         )
 
-    def identify_goals(
+    def identify_skills(
         self,
         message: str,
         catalog: Sequence[SkillRoutingDefinition],
         context: Optional[Mapping[str, Any]] = None,
-    ) -> List[GoalMatch]:
-        return self.understand_turn(message, catalog, context).goals
+    ) -> List[SkillMatch]:
+        return self.understand_turn(message, catalog, context).skill_matches
 
     def understand_turn(
         self,

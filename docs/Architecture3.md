@@ -6,7 +6,7 @@
 **Primary runtime:** Python, FastAPI/WebSockets, LangGraph, provider-neutral AI/guardrail/observability interfaces  
 **Initial model provider:** OpenAI via `OPENAI_API_KEY` and the Responses API  
 **Current observability:** provider-neutral console, in-memory test, and optional Langfuse/OpenTelemetry sinks; content is redacted by default  
-**Architecture style:** Objective-driven conversation + platform-owned jobs + deterministic execution + declarative capabilities
+**Architecture style:** Objective-driven conversation + platform-owned goals and durable tasks + governed execution + declarative capabilities
 
 ---
 
@@ -25,16 +25,17 @@ That model is predictable, but it becomes brittle when members speak naturally, 
 The proposed platform works differently:
 
 ```text
-member objective -> conversation understanding -> platform job(s) -> execution plan(s) -> governed capability execution -> composed response
+member objective -> conversation understanding -> selected skill(s) -> platform goal(s) -> durable task(s) -> governed execution plan(s) -> composed response
 ```
 
 The member owns the **objective**.  
-The platform owns durable **jobs** created to satisfy that objective.  
-Each job owns an **execution plan**.  
+The platform selects one or more **skills** and derives one **goal** from each
+selected single-goal skill. Each goal receives a durable **task**. The task
+advances through the selected skill release's governed **execution plan**.
 Each turn, the **Decision Engine** asks:
 
-1. Which job should be advanced now?
-2. What is the next safe step in that job's execution plan?
+1. Which task should be advanced now?
+2. What is the next safe step in that task's execution plan?
 
 The LLM provides contextual understanding and recommendations. The platform owns state, governance, persistence, validation, execution, audit, and final policy enforcement.
 
@@ -44,13 +45,13 @@ The LLM provides contextual understanding and recommendations. The platform owns
 
 This document distinguishes the **target architecture** from the working POC in
 this repository. The POC already proves the conversation-first control loop;
-it is not yet a full enterprise job-management or agent-desktop platform.
+it is not yet a full enterprise task-management or agent-desktop platform.
 
 | Area | Implemented now | Target-state extension |
 |---|---|---|
-| Conversation state | Durable SQLite session with one active task, queued tasks, paused tasks, pending clarifications, confirmation, and handoff state | Shared production-grade session/job store and cross-channel state |
-| Orchestration | One stable LangGraph lifecycle: understand, plan, collect, policy, execute, advance, resume, finalize | Independently deployable planning and job-priority services where scale requires them |
-| Understanding | Typed provider contract for goals, slot updates, conversation act, interruptions, and skill gaps; OpenAI, Bedrock, and deterministic adapters | Broader domain taxonomy, evaluations, and policy-aware ranking |
+| Conversation state | Durable SQLite session with one active task, queued tasks, paused tasks, pending clarifications, confirmation, and handoff state | Shared production-grade session/task store and cross-channel state |
+| Orchestration | One stable LangGraph lifecycle: understand, plan, collect, policy, execute, advance, resume, finalize | Independently deployable planning and task-priority services where scale requires them |
+| Understanding | Typed provider contract for skill matches, slot updates, conversation act, interruptions, and skill gaps; the runtime derives goals after validating matches | Broader domain taxonomy, evaluations, and policy-aware ranking |
 | Capabilities | Versioned `SKILL.md` catalog; declarative FAQ, guided balance, deterministic transfer, handoff; online-ID skill can be registered at runtime | Enterprise tool catalog, approval workflow, staged rollout, and richer capability types |
 | Responses | Controlled templates for unsupported requests and deterministic actions; FAQ is rendered only from retrieved approved knowledge | Channel-specific rendering, localization, and approved response variants |
 | Live support | Explicit confirmation then mock case creation with minimized summary | Contact-center routing, agent participant, queue status, and ownership transfer |
@@ -97,8 +98,8 @@ flowchart LR
     CH --> SM[Session Manager]
     SM --> O[Conversation Orchestrator]
     O --> CA[Conversation Analyzer]
-    CA --> JM[Job Manager]
-    JM --> DE[Decision Engine]
+    CA --> TM[Task Manager]
+    TM --> DE[Decision Engine]
     DE --> CAP[Capability / Skill Runtime]
     CAP --> API[Enterprise APIs]
     CAP --> RC[Response Composer]
@@ -117,9 +118,10 @@ Use this language consistently.
 | Term | Owner | Meaning |
 |---|---|---|
 | Objective | Member | What the member is trying to accomplish. It can be incomplete, broad, or ambiguous. |
-| Job | Platform | A durable unit of work created to satisfy all or part of a member objective. |
-| Execution plan | Job | The current steps to complete a job. It may be fixed, guided, or dynamically composed. |
 | Capability / Skill | Platform | A reusable business capability such as balance inquiry, transfer, FAQ, or live-agent handoff. |
+| Goal | Platform | An independently completable outcome derived from a selected skill. A single-goal skill supplies its own name as the goal identity. |
+| Task | Platform | The durable execution instance for a goal, including inputs, progress, and pinned skill version. `TaskState` is the implementation contract. |
+| Execution plan | Skill release / task | The governed steps used to complete a task. It may be fixed, guided, or dynamically composed. |
 | Tool | Platform | A typed executable operation, usually an API adapter or deterministic function. |
 | Decision | Platform-controlled model output | A structured recommendation for what should happen next. |
 | Response | Platform | A composed, governed message returned to the channel. |
@@ -132,23 +134,47 @@ Do not say:
 
 Say:
 
-> The member expresses objectives. The platform creates jobs. The model recommends next actions. The platform decides, persists, and executes.
+> The member expresses objectives. The platform selects skills, derives goals,
+> creates durable tasks, and governs execution. The model recommends
+> interpretations and next actions.
 
 ### 3.2 The hierarchy
 
 ```mermaid
 flowchart TD
-    O[Member Objective] --> J1[Platform Job 1]
-    O --> J2[Platform Job 2]
-    O --> J3[Platform Job 3]
-    J1 --> P1[Execution Plan]
-    J2 --> P2[Execution Plan]
-    J3 --> P3[Execution Plan]
-    DE[Decision Engine] -->|chooses which job to advance| J1
+    O[Member Objective] --> G1[Goal from Skill 1]
+    O --> G2[Goal from Skill 2]
+    O --> G3[Goal from Skill 3]
+    G1 --> T1[Durable Task 1]
+    G2 --> T2[Durable Task 2]
+    G3 --> T3[Durable Task 3]
+    T1 --> P1[Execution Plan]
+    T2 --> P2[Execution Plan]
+    T3 --> P3[Execution Plan]
+    DE[Decision Engine] -->|chooses which task to advance| T1
     DE -->|chooses next step| P1
 ```
 
-One objective may map to one job or many jobs. Each job has exactly one current execution plan, though the plan can evolve.
+One objective may select one skill or several skills. Each selected single-goal
+skill produces one goal and one durable task. Each task has exactly one current
+execution plan, though the plan can evolve.
+
+### 3.3 Queued work is not interrupted work
+
+The runtime distinguishes two task collections because they carry different
+conversation commitments:
+
+- `queued_tasks` were explicitly requested as part of the same member
+  objective. After one task completes, the platform advances the next queued
+  task automatically. Asking for another generic “continue?” would repeat
+  consent the member already gave. The next task still enforces its own
+  authentication, authorization, validation, and consequential confirmation.
+- `paused_tasks` were suspended because a later objective interrupted active
+  work. After the interrupting task completes, the assistant asks whether to
+  resume or discard the paused task.
+
+All member-facing task references use the selected skill's `display_name`, not
+the machine `skill_name` or derived goal identifier.
 
 ---
 
@@ -160,9 +186,9 @@ The conversation can be flexible, contextual, and adaptive. Consequential execut
 
 ### P2. Model advises; platform decides and persists
 
-The LLM can recommend interpretation, job creation, prioritization, skill selection, fact updates, and next action. It does not directly mutate official state. The platform validates and persists state transitions.
+The LLM can recommend interpretation, skill selection, task creation, prioritization, fact updates, and next action. It does not directly mutate official state. The platform validates and persists state transitions.
 
-### P3. Members own objectives; platform owns jobs; jobs own execution plans
+### P3. Members own objectives; skills define capabilities; the platform owns goals and tasks
 
 This is the core mental model.
 
@@ -170,8 +196,8 @@ This is the core mental model.
 
 The Decision Engine asks:
 
-1. Which job should be advanced now?
-2. What is the next safe step in that job's execution plan?
+1. Which task should be advanced now?
+2. What is the next safe step in that task's execution plan?
 
 ### P5. Skills declare execution mode
 
@@ -183,11 +209,36 @@ Every capability declares how it must execute:
 | Guided | Account lookup, quote intake, claims intake | Progressive information gathering with deterministic validation. |
 | Deterministic | Transfers, card lock/replace, profile changes | Fixed gates: authentication, authorization, validation, confirmation, audit. |
 
-The planner does not improvise high-risk workflows. It selects the skill; the skill runtime enforces the declared mode.
+"Deterministic" describes execution control, not language understanding. Every
+member turn still goes through the same context-aware semantic contract and may
+fill or correct several schema-declared inputs. The planner does not improvise
+high-risk workflows: it selects the skill, while the skill runtime enforces its
+fixed gates after the platform validates the provider's structured slot updates.
 
 ### P6. Structured understanding, not hidden reasoning as control flow
 
 Model outputs used for control flow must conform to typed contracts. Free-form text cannot directly drive state transitions.
+
+#### Bounded working context
+
+The durable conversation transcript and the model's per-turn working context
+serve different purposes. The transcript is retained for continuity, replay,
+audit, and the member interface. A semantic turn receives structured task state
+plus only the eight most recent member or assistant messages, each bounded to
+500 characters.
+
+This limit is a POC default, not an authoritative-memory boundary. Accepted
+values must be persisted on their active or queued task. Bounded dialogue helps
+resolve nearby references while reducing stale-goal contamination, superseded
+value reuse, unbounded token growth, latency, cost, and unnecessary member-data
+disclosure. Sending the entire transcript with an instruction to ignore
+irrelevant history would leave those controls to probabilistic prompt following.
+
+History recovery therefore requires structured provenance and schema
+validation. Cross-goal values are not silently copied; absent an explicit
+current reference, the assistant must ask before using them. See
+[Conversation context and memory policy](conversation-context.md) for the full
+decision rules and the task-scoped memory evolution path.
 
 ### P7. Skills return business results; controlled response composition creates member experience
 
@@ -234,7 +285,7 @@ flowchart LR
         SM[Session Manager]
         ORCH[Conversation Orchestrator\nLangGraph]
         CA[Conversation Analyzer]
-        JM[Job Manager]
+        TM[Task Manager]
         PLAN[Planning Engine]
         DE[Decision Engine]
         REG[Capability / Skill Registry]
@@ -248,7 +299,7 @@ flowchart LR
     subgraph Runtime[Provider-neutral AI + Platform Runtime]
         MP[Model Provider Interface]
         GP[Guardrail / Policy Provider]
-        DB[(Session + Job Store)]
+        DB[(Session + Task Store)]
         OTEL[OpenTelemetry Instrumentation]
         LF[Langfuse
 Default Trace UI]
@@ -272,7 +323,7 @@ Optional Trace UI]
     API --> SM
     SM --> ORCH
     ORCH --> CA
-    ORCH --> JM
+    ORCH --> TM
     ORCH --> PLAN
     ORCH --> DE
     DE --> REG
@@ -288,7 +339,7 @@ Optional Trace UI]
     RC --> MP
     GR --> GP
     SM --> DB
-    JM --> DB
+    TM --> DB
     OBS --> OTEL
     OTEL --> LF
     OTEL -. optional .-> LS
@@ -303,7 +354,7 @@ Owns conversation-level state:
 - member context reference;
 - conversation history summary;
 - active/paused/escalated mode;
-- linked job IDs;
+- linked task IDs;
 - live-agent connection state.
 
 It does not decide business workflows.
@@ -333,27 +384,26 @@ Uses a model to produce structured understanding of the latest turn:
 - safety/policy flags;
 - recommendation only, not official state mutation.
 
-### 5.4 Job Manager
+### 5.4 Task Manager
 
-Owns durable platform jobs.
+Owns durable platform tasks created for derived goals.
 
 **POC mapping:** this responsibility is represented by durable task state in
 the conversation store (`active_task`, `queued_tasks`, `paused_tasks`) rather
-than a separately deployed Job Manager. A task pins the skill version and
+than a separately deployed Task Manager. A task pins the skill version and
 artifact hash so an in-flight request can complete after a catalog change.
 
 Responsibilities:
 
-- create jobs from validated objectives;
-- decompose a complex objective into multiple jobs;
-- maintain job status and priority;
-- pause/resume/cancel/complete/escalate jobs;
-- persist official job state;
-- enforce job policies such as interruptible/non-interruptible.
+- create one task for each validated platform goal;
+- maintain task status and priority;
+- pause/resume/cancel/complete/escalate tasks;
+- persist official task state;
+- enforce task policies such as interruptible/non-interruptible.
 
 ### 5.5 Planning Engine
 
-Creates or updates a job's execution plan.
+Creates or updates a task's execution plan.
 
 Plan types:
 
@@ -362,7 +412,8 @@ Plan types:
 - **dynamic plan:** a future model-assisted composition from allowed
   capabilities/tools, subject to policy.
 
-The plan lives on the job record.
+The plan is pinned to the task through its exact skill version and artifact
+hash. In the POC, workflow progress and variables live directly on `TaskState`.
 
 ### 5.6 Decision Engine
 
@@ -371,7 +422,7 @@ Chooses what to advance on this turn.
 Inputs:
 
 - session state;
-- job list;
+- task list;
 - current execution plans;
 - analyzer output;
 - skill registry;
@@ -447,7 +498,13 @@ All model access goes through a small platform-owned interface. Business compone
 Current implementation: OpenAI Responses API, Amazon Bedrock Converse, and a
 deterministic provider for offline use or ordinary provider-availability
 fallback. Bedrock guardrail interventions are terminal safety outcomes and do
-not fall through to the deterministic provider.
+not fall through to the deterministic provider. When the semantic provider
+succeeds, its turn analysis is authoritative; deterministic fallback analysis
+is never mixed into the same turn. The runtime also never binds raw member text
+to a pending field without a provider-declared semantic binding. Pending queued
+tasks expose their pinned schema and current inputs to the same turn contract.
+History-based recovery is accepted only for a still-missing field and requires
+an exact evidence span from a prior member utterance.
 
 Required provider capabilities:
 
@@ -478,7 +535,7 @@ class ModelProvider(Protocol):
     async def stream_text(self, request): ...
 ```
 
-Future adapters may target another hosted model API, a cloud-managed model service, or a self-hosted model without changing Session Manager, Job Manager, Planning Engine, Decision Engine, Skill Runtime, or Response Composer.
+Future adapters may target another hosted model API, a cloud-managed model service, or a self-hosted model without changing Session Manager, Task Manager, Planning Engine, Decision Engine, Skill Runtime, or Response Composer.
 
 ### 5.13 Observability + Audit
 
@@ -490,10 +547,10 @@ Observability is provider-neutral and OpenTelemetry-first. Platform code emits t
 
 Record at minimum:
 
-- end-to-end `trace_id`, `session_id`, `objective_id`, `job_id`, and `plan_id`;
+- end-to-end `trace_id`, `session_id`, `objective_id`, `goal_id`, `task_id`, and `plan_id`;
 - LangGraph node entry/exit and duration;
 - session state transitions;
-- job lifecycle and priority transitions;
+- task lifecycle and priority transitions;
 - model provider/model name, latency, token usage, and cost metadata;
 - analyzer, planner, and decision structured outputs;
 - schema-validation outcomes;
@@ -542,7 +599,7 @@ sequenceDiagram
     participant SM as Session Manager
     participant O as Orchestrator / LangGraph
     participant CA as Conversation Analyzer
-    participant JM as Job Manager
+    participant TM as Task Manager
     participant DE as Decision Engine
     participant SR as Skill Registry
     participant RT as Skill Runtime
@@ -550,12 +607,12 @@ sequenceDiagram
     participant G as Guardrails
 
     C->>SM: Member message
-    SM->>O: Session + jobs + latest message
+    SM->>O: Session + tasks + latest message
     O->>CA: Analyze turn
     CA-->>O: Structured understanding
-    O->>JM: Validate/apply job recommendations
-    JM-->>O: Updated jobs and priorities
-    O->>DE: Which job? What next step?
+    O->>TM: Validate skill matches, derive goals, create/update tasks
+    TM-->>O: Updated tasks and priorities
+    O->>DE: Which task? What next step?
     DE-->>O: ConversationDecision
     O->>SR: Resolve capability / skill
     SR-->>O: Skill contract + execution mode
@@ -564,23 +621,23 @@ sequenceDiagram
     O->>RC: Compose response
     RC->>G: Validate response + policy
     G-->>C: Final response
-    O->>SM: Persist session/job/graph state
+    O->>SM: Persist session/task/graph state
 ```
 
 ---
 
-## 7. Job lifecycle
+## 7. Task lifecycle
 
 ```mermaid
 stateDiagram-v2
     [*] --> Candidate: objective detected
-    Candidate --> Active: validated + job created
+    Candidate --> Active: skill selected + goal derived + task created
     Active --> WaitingForInfo: missing facts
     WaitingForInfo --> Active: facts received
     Active --> AwaitingConfirmation: consequential action ready
     AwaitingConfirmation --> Active: confirmation received
     AwaitingConfirmation --> Cancelled: member declines
-    Active --> Paused: interruption / higher priority job
+    Active --> Paused: interruption / higher priority task
     Paused --> Active: resume selected
     Active --> Completed: success
     Active --> Failed: unrecoverable error
@@ -593,16 +650,16 @@ stateDiagram-v2
     Escalated --> [*]
 ```
 
-### 7.1 Job priority
+### 7.1 Task priority
 
-Priority is assigned at the job level, not the plan level.
+Priority is assigned at the task level, not the plan level.
 
 Priority inputs:
 
 - member's latest request;
 - urgency/safety/compliance;
 - side-question classification;
-- job interruptibility;
+- task interruptibility;
 - explicit member preference;
 - policy gates;
 - live-agent request.
@@ -616,8 +673,8 @@ The model must output structured JSON. The platform validates it before state ch
 ```json
 {
   "decision_type": "SUSPEND_AND_START",
-  "target_job_id": "job_transfer_123",
-  "new_job": {
+  "target_task_id": "task_transfer_123",
+  "new_task": {
     "objective_summary": "Check checking account balance",
     "candidate_skill_id": "account_balance",
     "priority": 90
@@ -637,70 +694,74 @@ The model must output structured JSON. The platform validates it before state ch
 
 - `ANSWER_DIRECT`
 - `ASK_CLARIFYING`
-- `START_JOB`
-- `CONTINUE_JOB`
+- `START_TASK`
+- `CONTINUE_TASK`
 - `SUSPEND_AND_START`
-- `RESUME_JOB`
-- `CANCEL_JOB`
-- `REPLACE_JOB`
+- `RESUME_TASK`
+- `CANCEL_TASK`
+- `REPLACE_TASK`
 - `UPDATE_FACTS`
 - `REQUEST_CONFIRMATION`
 - `HANDOFF_LIVE_AGENT`
-- `COMPLETE_JOB`
+- `COMPLETE_TASK`
 - `DECLINE_OR_BLOCK`
 
 ---
 
 ## 9. Skill specification model
 
-Each skill is declarative.
+Each skill is declarative. The standard authoring rule is one skill to one
+platform-derived goal; the authored skill name is the goal identity. The
+current v3 compiler rejects multi-goal artifacts; that extension is reserved
+for a future schema. See
+[`skill-authoring-and-publication.md`](skill-authoring-and-publication.md) for
+the canonical schema and
+[`skill-schema-migration-plan.md`](skill-schema-migration-plan.md) for the
+implementation sequence.
 
 ```yaml
-id: money_transfer
+schema_version: nexus.skills/v3
+name: internal_transfer
 version: 1.0.0
-domain: banking
-name: Money Transfer
-execution_mode: deterministic
 
-objective_examples:
-  - move $500 from checking to savings
-  - transfer money to my son
+display_name: make an internal transfer
+description: >
+  Moves money between eligible member-owned accounts. Use for requests to
+  transfer, move, or send funds between those accounts; do not use for external
+  transfers or person-to-person payments.
+examples:
+  - Move $500 from checking to savings.
+  - Send $200 from checking 1001 to savings.
 
-facts:
-  required:
-    - source_account
-    - destination_account
-    - amount
-  optional:
-    - memo
+metadata:
+  owner: money-movement-team
+  domain: banking
+  category: money-movement
 
-allowed_tools:
-  - list_accounts
-  - validate_transfer
-  - create_transfer
+input_schema:
+  type: object
+  required: [source_account, destination_account, amount]
+  properties:
+    source_account: {type: string}
+    destination_account: {type: string}
+    amount: {type: string, format: currency-amount}
 
-workflow:
-  mode: deterministic
-  steps:
-    - collect_required_facts
-    - validate_accounts
-    - validate_funds
-    - request_explicit_confirmation
-    - execute_idempotent_transfer
-    - audit_completion
+behavior:
+  archetype: deterministic_workflow
+  interaction: guided
+  execution: workflow
+  lifecycle: synchronous
 
-policy:
-  requires_authentication: true
-  requires_confirmation: true
-  interruptible_before_confirmation: true
-  interruptible_after_confirmation: false
+governance:
+  risk_tier: consequential
+  auth_required: true
+  confirmation_required: true
 
-response_contract:
-  schema: transfer_response_v1
-  templates:
-    ask_missing_amount: "How much would you like to transfer?"
-    confirmation: "Please confirm: transfer {amount} from {source_account} to {destination_account}."
-    success: "Done — I transferred {amount} from {source_account} to {destination_account}."
+implementation:
+  tools: [accounts, internal_transfer]
+  workflow:
+    version: 1
+    steps: []
 ```
 
 ---
@@ -746,7 +807,7 @@ Live-agent handoff is a first-class skill and platform mode.
 - Member may request a human at any point.
 - Policy may force handoff.
 - Repeated low-confidence clarification may trigger handoff.
-- Current session, jobs, facts, tool outcomes, and transcript summary must be passed to the agent.
+- Current session, tasks, facts, tool outcomes, and transcript summary must be passed to the agent.
 - WebSocket transport must support member and agent clients.
 - The bot should stop autonomous execution once human-agent mode is active unless explicitly configured for assistive mode.
 
@@ -792,14 +853,14 @@ sequenceDiagram
     participant M as Member
     participant API as WebSocket Gateway
     participant O as Orchestrator
-    participant JM as Job Manager
+    participant TM as Task Manager
     participant RT as Live-Agent Skill
     participant CRM as Case / Agent Routing
     participant A as Live Agent
 
     M->>API: I want to talk to a person
     API->>O: message.created
-    O->>JM: mark active jobs escalated/paused
+    O->>TM: mark active tasks escalated/paused
     O->>RT: create handoff context
     RT->>CRM: create/route case with context
     CRM-->>A: assign case
@@ -823,7 +884,7 @@ flowchart LR
     MPG --> OAI[OpenAI API\nInitial Provider]
     MPG -. future .-> ALT[Alternate Model Provider]
     APP --> GP[Guardrail / Policy Gateway]
-    APP --> DB[(Postgres\nSessions + Jobs + Audit refs)]
+    APP --> DB[(Postgres\nSessions + Tasks + Audit refs)]
     APP --> CACHE[(Redis optional\npresence/pub-sub)]
     APP --> OTEL[OpenTelemetry]
     OTEL --> LF[Langfuse\nDefault]
@@ -859,7 +920,7 @@ No component outside `providers/` may directly import or instantiate the OpenAI 
 ### 13.1 Account balance
 
 - Objective: "What's my checking balance?"
-- Jobs: one balance inquiry job.
+- Goal/task: one balance inquiry goal with one durable task.
 - Execution mode: guided or deterministic read-only.
 - Tools: list accounts, get balance.
 - Response: schema-assisted; account and balance formatting controlled.
@@ -867,7 +928,7 @@ No component outside `providers/` may directly import or instantiate the OpenAI 
 ### 13.2 Money transfer
 
 - Objective: "Move $500 from checking to savings."
-- Jobs: one transfer job.
+- Goal/task: one transfer goal with one durable task.
 - Execution mode: deterministic.
 - Required facts: source, destination, amount.
 - Required gates: auth, account validation, funds validation, explicit confirmation, idempotent execution, audit.
@@ -875,22 +936,22 @@ No component outside `providers/` may directly import or instantiate the OpenAI 
 ### 13.3 FAQ / knowledge answer
 
 - Objective: "What's the wire transfer cutoff time?"
-- Jobs: optional short-lived FAQ job or direct answer.
+- Goal/task: optional short-lived FAQ goal/task or direct answer.
 - Execution mode: conversational with grounding.
 - Required gates: approved knowledge source, response validation.
 
 ### 13.4 Interruption during transfer
 
 - Objective 1: Transfer money.
-- Job 1: transfer job active.
+- Task 1: transfer task active.
 - Objective 2/side question: check balance.
-- Job 2: balance inquiry job becomes higher priority.
+- Task 2: balance inquiry task becomes higher priority.
 - Behavior: pause transfer, answer balance, offer to resume transfer.
 
 ### 13.5 Live-agent handoff
 
 - Objective: get human help.
-- Job: live-agent handoff.
+- Goal/task: live-agent handoff goal with one durable task.
 - Behavior: stop autonomous completion, create context summary, connect member and live agent through WebSocket.
 
 ---
@@ -903,7 +964,7 @@ No component outside `providers/` may directly import or instantiate the OpenAI 
 - health endpoint;
 - settings;
 - domain models;
-- session/job repositories;
+- session/task repositories;
 - LangGraph graph skeleton;
 - provider-neutral model gateway with OpenAI adapter and fake adapter for tests;
 - guardrail interface with fake adapter;
@@ -935,7 +996,7 @@ No component outside `providers/` may directly import or instantiate the OpenAI 
 ### Slice 5 — Interruption/resume
 
 - balance side question during transfer;
-- job pause/resume state transitions;
+- task pause/resume state transitions;
 - resume prompt.
 
 ### Slice 6 — Live agent
@@ -964,15 +1025,15 @@ No component outside `providers/` may directly import or instantiate the OpenAI 
 1. The orchestrator is generic and does not branch on individual skill IDs.
 2. New skills can be loaded declaratively when existing tools are sufficient.
 3. All model decisions are structured and validated.
-4. Session and job state are explicitly persisted.
+4. Session and task state are explicitly persisted.
 5. Transfers cannot execute without deterministic validation and explicit confirmation.
-6. Interruptions pause and resume jobs rather than dropping state.
+6. Interruptions pause and resume tasks rather than dropping state.
 7. Response Composer and Guardrails are separate stages.
 8. Live-agent handoff preserves context.
 9. Tests cover single-turn, multi-turn, interrupted, handoff, and invalid-model-output scenarios.
 10. No core domain/orchestration component directly imports a model-provider or observability-vendor SDK.
 11. The OpenAI adapter can be replaced by a fake provider in tests without changing business components.
-12. A complete member turn can be inspected in Langfuse from inbound message through LangGraph nodes, model calls, job transitions, tool calls, response composition, and guardrail outcome.
+12. A complete member turn can be inspected in Langfuse from inbound message through LangGraph nodes, model calls, task transitions, tool calls, response composition, and guardrail outcome.
 13. Sensitive member data is redacted before trace export.
 14. Architecture diagrams and implementation remain aligned.
 

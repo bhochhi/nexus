@@ -48,6 +48,7 @@ class TaskState(TypedDict, total=False):
     skill_artifact_hash: str
     workflow_step: int
     variables: Dict[str, Any]
+    context: Dict[str, Any]
 
 
 class ConversationState(TypedDict):

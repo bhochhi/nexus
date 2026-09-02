@@ -33,14 +33,18 @@ def test_hot_discovery_then_interrupt_and_resume(runtime_factory):
     interrupted = runtime.chat("interrupt", "I forgot my online ID")
     assert "online-id recovery" in interrupted.text.casefold()
     assert "resume or discard" in interrupted.text
+    assert "check an account balance" in interrupted.text
+    assert "guided_balance" not in interrupted.text
     state = runtime.inspect_state("interrupt")
     assert state["paused_tasks"][0]["skill_name"] == "guided_balance"
     assert state["awaiting_resume"] is True
 
     resumed = runtime.chat("interrupt", "resume")
     assert "Resuming" in resumed.text
+    assert "check an account balance" in resumed.text
+    assert "guided_balance" not in resumed.text
     assert "Which account" in resumed.text
-    completed = runtime.chat("interrupt", "checking")
+    completed = runtime.chat("interrupt", "checking 1001")
     assert "$2,450.75" in completed.text
 
 
@@ -53,6 +57,8 @@ def test_interruption_can_be_discarded(runtime_factory):
     reply = runtime.chat("discard", "discard")
 
     assert "discarded" in reply.text
+    assert "check an account balance" in reply.text
+    assert "guided_balance" not in reply.text
     state = runtime.inspect_state("discard")
     assert state["active_task"] is None
     assert state["paused_tasks"] == []

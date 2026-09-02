@@ -4,7 +4,7 @@ import re
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from member_assistant.catalog import SkillRoutingDefinition
-from .base import GoalMatch, ModelProvider, SkillGap, SlotUpdate, TurnAnalysis
+from .base import SkillGap, SkillMatch, ModelProvider, SlotUpdate, TurnAnalysis
 
 
 class DeterministicProvider(ModelProvider):
@@ -32,49 +32,37 @@ class DeterministicProvider(ModelProvider):
             )
         return metadata
 
-    def identify_goals(
+    def identify_skills(
         self,
         message: str,
         catalog: Sequence[SkillRoutingDefinition],
         context: Optional[Mapping[str, Any]] = None,
-    ) -> List[GoalMatch]:
+    ) -> List[SkillMatch]:
         normalized = " ".join(message.lower().replace("’", "'").split())
-        matches: List[GoalMatch] = []
+        normalized_example = " ".join(re.findall(r"[a-z0-9]+", normalized))
+        matches: List[SkillMatch] = []
         for skill in catalog:
-            best_goal = None
             best_score = 0
             for goal in skill.supported_goals:
                 keywords = [str(word).lower() for word in goal.get("keywords", [])]
                 score = sum(1 for keyword in keywords if keyword in normalized)
                 if score > best_score:
-                    best_goal = str(goal["name"])
                     best_score = score
-            if best_goal and best_score:
-                matches.append(
-                    GoalMatch(
-                        skill_name=skill.name,
-                        goal=best_goal,
-                        confidence=min(0.99, 0.76 + best_score * 0.08),
-                        inputs=self.extract_inputs(skill, message),
+            for sample in skill.sample_utterances:
+                sample_text = " ".join(
+                    re.findall(
+                        r"[a-z0-9]+",
+                        str(sample.get("utterance", "")).casefold(),
                     )
                 )
-
-        # Keep the offline demo responsive to a common balance phrasing that is
-        # semantically equivalent to the catalog's "how much money" example.
-        # Hosted semantic providers already recognize this without the fallback.
-        if "how much i have" in normalized and not any(
-            match.skill_name == "guided_balance" for match in matches
-        ):
-            balance_skill = next(
-                (skill for skill in catalog if skill.name == "guided_balance"), None
-            )
-            if balance_skill:
+                if sample_text and sample_text == normalized_example:
+                    best_score = max(best_score, 2)
+            if best_score:
                 matches.append(
-                    GoalMatch(
-                        skill_name=balance_skill.name,
-                        goal=str(balance_skill.supported_goals[0]["name"]),
-                        confidence=0.84,
-                        inputs=self.extract_inputs(balance_skill, message),
+                    SkillMatch(
+                        skill_name=skill.name,
+                        confidence=min(0.99, 0.76 + best_score * 0.08),
+                        inputs=self.extract_inputs(skill, message),
                     )
                 )
 
@@ -90,9 +78,8 @@ class DeterministicProvider(ModelProvider):
             inputs = self.extract_inputs(prior_skill, message) if prior_skill else {}
             if prior_skill and inputs:
                 matches.append(
-                    GoalMatch(
+                    SkillMatch(
                         skill_name=prior_skill.name,
-                        goal=str(prior_skill.supported_goals[0]["name"]),
                         confidence=0.84,
                         inputs=inputs,
                     )
@@ -116,7 +103,7 @@ class DeterministicProvider(ModelProvider):
         context: Optional[Mapping[str, Any]] = None,
     ) -> TurnAnalysis:
         normalized = " ".join(message.lower().replace("’", "'").split())
-        goals = self.identify_goals(message, catalog, context)
+        goals = self.identify_skills(message, catalog, context)
         active_name = str((context or {}).get("active_skill") or "")
         active = next((skill for skill in catalog if skill.name == active_name), None)
         extracted = self.extract_inputs(active, message) if active else {}
@@ -124,31 +111,71 @@ class DeterministicProvider(ModelProvider):
         # multi-slot interpretation belongs to a semantic provider; otherwise a
         # four-digit account suffix can be mistaken for a transfer amount.
         missing_field = str((context or {}).get("missing_field") or "")
+        correction_cues = ("actually", "instead", "change", "correction")
+        is_correction = any(cue in normalized for cue in correction_cues)
         slot_updates = []
         if active and active.archetype == "guided_resolution":
             slot_updates.extend(
-                SlotUpdate(field_name, value, 1.0)
+                SlotUpdate(
+                    field_name,
+                    value,
+                    1.0,
+                    "pending_answer" if field_name == missing_field else "explicit",
+                )
                 for field_name, value in extracted.items()
             )
-        elif missing_field and missing_field in extracted:
-            slot_updates.append(SlotUpdate(missing_field, extracted[missing_field], 1.0))
+        elif missing_field and missing_field in extracted and not is_correction:
+            slot_updates.append(
+                SlotUpdate(
+                    missing_field,
+                    extracted[missing_field],
+                    1.0,
+                    "pending_answer",
+                )
+            )
+        elif (
+            active
+            and missing_field
+            and not is_correction
+            and self._is_direct_pending_answer(normalized)
+        ):
+            # Offline/fallback mode can conservatively bind a direct reply to the
+            # question it just asked. This limitation stays inside the provider
+            # adapter; the runtime itself never assigns raw text to a slot.
+            slot_updates.append(
+                SlotUpdate(missing_field, message.strip(), 0.82, "pending_answer")
+            )
         current_inputs = dict((context or {}).get("current_inputs") or {})
-        missing_field = str((context or {}).get("missing_field") or "")
-        correction_cues = ("actually", "instead", "change", "correction")
-        is_correction = any(cue in normalized for cue in correction_cues)
         for field_name, value in extracted.items():
             if current_inputs.get(field_name) not in {None, ""} and current_inputs.get(
                 field_name
             ) != value and (not missing_field or field_name == missing_field or is_correction):
-                slot_updates.append(SlotUpdate(field_name, value, 1.0))
+                slot_updates.append(SlotUpdate(field_name, value, 1.0, "correction"))
         return TurnAnalysis(
-            goals=goals,
+            skill_matches=goals,
             skill_gap=self._detect_skill_gap(normalized, goals),
             slot_updates=slot_updates,
             conversation_act="provide_information" if slot_updates else "unknown",
             active_goal_relation="continue" if slot_updates else "none",
             **self.classify_sentiment(normalized, context),
         )
+
+    @staticmethod
+    def _is_direct_pending_answer(normalized_message: str) -> bool:
+        return normalized_message not in {
+            "",
+            "yes",
+            "yes please",
+            "no",
+            "no thanks",
+            "ok",
+            "okay",
+            "sure",
+            "both",
+            "hello",
+            "hi",
+            "hey",
+        }
 
     @staticmethod
     def classify_sentiment(
@@ -202,7 +229,7 @@ class DeterministicProvider(ModelProvider):
 
     @staticmethod
     def _detect_skill_gap(
-        normalized_message: str, goals: Sequence[GoalMatch]
+        normalized_message: str, goals: Sequence[SkillMatch]
     ) -> Optional[SkillGap]:
         """Recognize a small set of unambiguous safety-critical capability gaps.
 

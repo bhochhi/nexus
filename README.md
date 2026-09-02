@@ -246,12 +246,16 @@ with a shared broker for a multi-instance deployment.
 
 ## Conversation behavior
 
-Semantic turn understanding runs for every member utterance, with the active
-task, current inputs, full input schema, missing field, pending question, and
-resume state supplied as context to the provider. One result can identify a new
-goal, interpret several active-task inputs, recognize a correction, or report
-ambiguity. The runtime accepts only schema-declared slot values above its
-confidence threshold, then applies deterministic conversation controls:
+Semantic turn understanding runs for every member utterance, with bounded recent
+messages, the active task, current inputs, full input schema, missing field,
+pending question, and resume state supplied as context to the provider. One
+result can identify a new goal, interpret several active-task inputs, resolve an
+unambiguous conversational reference, recognize a correction, or report
+ambiguity. A successful semantic result is authoritative for that turn; the
+runtime does not merge a second regex/keyword interpretation into it or assign
+raw text to whichever field happens to be pending. The runtime accepts only
+schema-declared slot values above its confidence threshold, then applies
+deterministic conversation controls:
 
 - A member can answer more than the field just requested. For example, “from
   saving to checking” supplies both transfer accounts, and “two hundred” can be
@@ -260,6 +264,12 @@ confidence threshold, then applies deterministic conversation controls:
 - A correction made at confirmation invalidates the previous review, restarts
   deterministic validation with the corrected values, and presents a new
   review. It never edits an already-confirmed submission.
+- If the provider cannot confidently bind a member value to a slot, the input
+  remains missing and the skill's current elicitation is presented again.
+- A queued goal retains every input extracted from the original multi-goal
+  utterance. If an input was initially missed, the transition turn may recover
+  it from bounded member history only with an exact evidence span from a prior
+  member message; assistant wording and unsupported recollection are rejected.
 - A clear different goal pauses current work. After the interrupting goal is
   served, the member is asked whether to resume or discard the paused goal.
 - Close alternative goal candidates produce a durable disambiguation question.
@@ -284,10 +294,29 @@ confidence threshold, then applies deterministic conversation controls:
 The LLM supplies structured goal candidates, field-level slot interpretations
 with confidence, and the conversational relationship to the active goal. It
 does not choose policy outcomes, declare inputs valid, order workflow steps, or
-execute tools. Strong catalog keyword matches are merged with model output so an
-explicit phrase such as “live agent” cannot be lost because of an invalid model
-confidence score. The deterministic fallback deliberately performs narrower
-single-field extraction rather than pretending to be a production NLU system.
+execute tools. A successful semantic-provider result is authoritative for that
+turn and is not mixed with a second keyword interpretation. The deterministic
+fallback deliberately performs narrower single-field extraction rather than
+pretending to be a production NLU system.
+
+### Bounded conversation context
+
+The complete transcript is persisted, but each semantic turn receives only the
+current structured task state and the eight most recent member or assistant
+messages, each bounded to 500 characters. This window supports nearby references
+without repeatedly sending the entire session to the model.
+
+Eight messages is a POC working-context default, not the source of truth. Durable
+active and queued tasks retain accepted inputs independently of the transcript
+window. Sending all history on every turn is intentionally avoided because old
+or superseded values and completed goals can contaminate slot selection and goal
+routing; it also increases token use, latency, cost, and unnecessary disclosure
+of member data. Prompt wording alone cannot reliably enforce “ignore unrelated
+history.” Evidence-backed recovery and future task-scoped memory provide a safer
+path for older information.
+
+See [Conversation context and memory policy](docs/conversation-context.md) for
+the recovery, cross-goal reuse, confirmation, and longer-term memory rules.
 
 The same understanding result can contain a `skill_gap` when the member has a
 clear objective but no installed skill supports it. The assistant acknowledges
@@ -311,6 +340,10 @@ The runtime emits one trace for each member turn, with nested observations for s
 
 Console tracing is enabled by default. Interactive runs use compact, color-coded output for the important LLM, policy, skill, tool, and turn observations. It records decision evidence such as goal candidates and confidence, selected skill and version, risk tier, policy result, model/provider and fallback status, tool outcome, latency, and provider token usage when available. It does not record hidden model reasoning. Set `TRACE_CONSOLE_FORMAT=json` or pass `--trace-format json` when machine-readable JSON lines are needed; `--log-level DEBUG` also displays lower-level graph and state spans in pretty mode.
 
+See [Console tracing reference](docs/console-tracing.md) for the complete line
+anatomy, category and observation-name catalog, field definitions, visibility
+rules, and troubleshooting examples.
+
 ### How to read server traces and member events
 
 The server terminal owns model, policy, skill, tool, and Langfuse traces. Read
@@ -327,7 +360,9 @@ time in milliseconds.
 | `POLICY policy.evaluate` | Deterministic authentication, authorization, risk, and confirmation controls evaluated the selected skill. |
 | `TOOL tool.<name>` | A typed integration was called. Every integration in this POC is mock/local even when its name describes accounts, transfers, or a live agent. |
 | `SKILL skill.<name>` | The declarative skill workflow completed its current pass. It may have asked for missing input, paused for confirmation, or produced an outcome. |
+| `GAP skill_gap.detected` | A clear member objective was understood, but no active catalog skill supported it with sufficient confidence. |
 | `TURN member-assistant.turn` | The root observation summarizing the complete member turn, including model, policy, tools, skill execution, state persistence, and reply. |
+| `TRACE graph.*`, `workflow.*`, `state.*`, or `response.*` | Lower-level orchestration detail shown at `DEBUG` or when the observation fails. |
 | `assistant>` | A member-facing WebSocket message rendered by the member client. |
 | `assistant is working…` | The durable `turn.accepted` event arrived and server processing has begun. |
 | `model(last call)>` | Completion-event metadata showing which provider/model handled the most recent model operation. |
@@ -346,7 +381,7 @@ Common metadata fields are:
 | `fallback=no` | The configured provider succeeded. `fallback=yes` means the deterministic availability provider handled that operation. |
 | `in_tokens` / `out_tokens` | Tokens sent to and returned by the model for this call. |
 | `goal_aliases` | Number of model-returned friendly goal labels safely normalized to catalog goal IDs. It appears only when nonzero. |
-| `invalid_goals` | Number of undeclared model-returned goals rejected before routing. It appears only when nonzero. |
+| `invalid_skills` | Number of model-returned skill names rejected because they were not in the supplied discovery catalog. It appears only when nonzero. |
 | `act` | The interpreted conversational act, such as `provide_information`, `correction`, or `new_goal`. |
 | `relation` | Whether the utterance continues, replaces, or is ambiguous relative to the active goal. |
 | `slots` | Schema-declared active-task fields understood from this utterance. Values remain redacted from the compact trace. |

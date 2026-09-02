@@ -22,9 +22,9 @@ from member_assistant.observability import Observability, build_observability
 from member_assistant.policy import PolicyEngine
 from member_assistant.providers import (
     DeterministicProvider,
-    GoalMatch,
     ModelProvider,
     SkillGap,
+    SkillMatch,
     SlotUpdate,
     build_provider,
 )
@@ -693,6 +693,19 @@ class AgentRuntime:
         # finish naturally after that version is deactivated for new requests.
         catalog = self.catalog.routes()
         active = conversation.get("active_task")
+        pending_transition = conversation.get("pending_task_transition")
+        queued = conversation.get("queued_tasks", [])
+        pending_task = (
+            queued[0]
+            if pending_transition
+            and queued
+            and queued[0].get("id") == pending_transition.get("task_id")
+            else None
+        )
+        understanding_task = active or pending_task
+        understanding_definition = (
+            self._task_definition(understanding_task) if understanding_task else None
+        )
         active_route = next(
             (
                 route
@@ -707,17 +720,65 @@ class AgentRuntime:
             if active_definition is not None:
                 active_route = active_definition.routing_definition()
                 understanding_catalog.append(active_route)
-        goal_context = {
-            "active_skill": active.get("skill_name") if active else None,
-            "active_goal": active.get("goal") if active else None,
-            "last_selected_skill": conversation.get("last_completed_skill"),
-            "task_status": active.get("status") if active else None,
-            "missing_field": active.get("missing_field") if active else None,
-            "pending_question": active.get("pending_question") if active else None,
-            "current_inputs": dict(active.get("inputs", {})) if active else {},
-            "active_input_schema": (
-                dict(active_route.input_schema) if active_route else {}
+        understanding_route = next(
+            (
+                route
+                for route in understanding_catalog
+                if understanding_task
+                and route.name == understanding_task.get("skill_name")
             ),
+            None,
+        )
+        if understanding_task and understanding_route is None:
+            if understanding_definition is not None:
+                understanding_route = understanding_definition.routing_definition()
+                understanding_catalog.append(understanding_route)
+        goal_context = {
+            "active_skill": (
+                understanding_task.get("skill_name") if understanding_task else None
+            ),
+            "active_goal": (
+                understanding_task.get("goal") if understanding_task else None
+            ),
+            "last_selected_skill": conversation.get("last_completed_skill"),
+            "task_status": (
+                "pending_transition"
+                if pending_task and not active
+                else (understanding_task.get("status") if understanding_task else None)
+            ),
+            "missing_field": (
+                understanding_task.get("missing_field") if understanding_task else None
+            ),
+            "pending_question": (
+                understanding_task.get("pending_question")
+                if understanding_task
+                else None
+            ),
+            "current_inputs": (
+                dict(understanding_task.get("inputs", {}))
+                if understanding_task
+                else {}
+            ),
+            "active_input_schema": (
+                dict(understanding_route.input_schema) if understanding_route else {}
+            ),
+            # A v2 Markdown body is the model-facing Tier 2 activation contract.
+            # Legacy v1 bodies may contain executable YAML, so they stay runtime-only.
+            "active_skill_instructions": (
+                understanding_definition.activation_instructions[:5000]
+                if understanding_definition is not None
+                and understanding_definition.api_version
+                in {"nexus.skills/v2", "nexus.skills/v3"}
+                else ""
+            ),
+            "recent_messages": [
+                {
+                    "role": str(item.get("role", "")),
+                    "content": " ".join(str(item.get("content", "")).split())[:500],
+                }
+                for item in conversation.get("messages", [])[-8:]
+                if item.get("role") in {"user", "assistant"}
+            ],
             "awaiting_resume": conversation.get("awaiting_resume", False),
             "pending_goal_candidates": [
                 candidate.get("skill_name")
@@ -725,8 +786,9 @@ class AgentRuntime:
                     conversation.get("pending_goal_clarification") or {}
                 ).get("candidates", [])
             ],
-            "pending_task_transition": bool(
-                conversation.get("pending_task_transition")
+            "pending_task_transition": bool(pending_transition),
+            "pending_task_transition_question": (
+                pending_transition.get("question") if pending_transition else None
             ),
             "previous_sentiment": conversation.get("sentiment", "unknown"),
             "negative_sentiment_streak": conversation.get(
@@ -754,8 +816,8 @@ class AgentRuntime:
                 generation.update(
                     output={
                         "safety_intervened": True,
-                        "goal_count": 0,
-                        "accepted_goal_count": 0,
+                        "skill_match_count": 0,
+                        "accepted_skill_match_count": 0,
                     },
                     metadata=provider_metadata,
                 )
@@ -793,81 +855,73 @@ class AgentRuntime:
                 }
             (
                 provider_matches,
-                canonicalized_provider_goals,
-                rejected_provider_goals,
-            ) = self._normalize_goal_matches(
-                provider_analysis.goals, understanding_catalog
-            )
-            deterministic_analysis = DeterministicProvider().understand_turn(
-                message, understanding_catalog, goal_context
-            )
-            deterministic_matches, _, _ = self._normalize_goal_matches(
-                deterministic_analysis.goals,
-                understanding_catalog,
-            )
-            goal_matches = self._merge_goal_matches(
-                provider_matches, deterministic_matches
+                _,
+                rejected_provider_skills,
+            ) = self._normalize_skill_matches(
+                provider_analysis.skill_matches, understanding_catalog
             )
             provider_metadata = self.provider.observability_metadata()
+            # The configured provider already owns fallback behavior. Mixing a
+            # second deterministic interpretation into every successful LLM turn
+            # can overwrite semantics with shape- or keyword-based guesses.
+            # Preserve deterministic candidates only when that provider actually
+            # handled this turn (offline mode or an explicit availability fallback).
+            deterministic_turn = (
+                provider_metadata.get("understanding_mode") != "semantic"
+            )
+            deterministic_matches = provider_matches if deterministic_turn else []
+            goal_matches = provider_matches
             accepted_matches = [
                 match
                 for match in goal_matches
                 if match.confidence >= GOAL_CONFIDENCE_THRESHOLD
             ]
-            skill_gap = provider_analysis.skill_gap or deterministic_analysis.skill_gap
+            skill_gap = provider_analysis.skill_gap
             accepted_skill_gap = (
                 skill_gap
                 if skill_gap
                 and skill_gap.confidence >= SKILL_GAP_CONFIDENCE_THRESHOLD
                 else None
             )
+            conversation_act = provider_analysis.conversation_act
+            active_goal_relation = provider_analysis.active_goal_relation
             slot_updates: Dict[str, Any] = {}
             rejected_slot_updates = 0
-            if active_route and active:
-                slot_candidates: List[SlotUpdate] = []
-                for match in deterministic_matches + provider_matches:
-                    if (
-                        match.skill_name == active.get("skill_name")
-                        and match.goal == active.get("goal")
-                    ):
-                        slot_candidates.extend(
-                            SlotUpdate(field_name, value, match.confidence)
-                            for field_name, value in match.inputs.items()
-                        )
-                slot_candidates.extend(deterministic_analysis.slot_updates)
-                slot_candidates.extend(provider_analysis.slot_updates)
+            if understanding_route and understanding_task:
+                # Goal inputs describe a newly requested goal. During an active
+                # task, only explicitly bound slot updates may change task inputs;
+                # recycling routing extraction here can turn a shape match (for
+                # example, a four-digit identifier) into the wrong field.
                 slot_updates, rejected_slot_updates = self._normalize_slot_updates(
-                    slot_candidates, active_route
+                    list(provider_analysis.slot_updates),
+                    understanding_route,
+                    pending_field=str(understanding_task.get("missing_field") or ""),
+                    conversation_act=conversation_act,
+                    current_inputs=dict(understanding_task.get("inputs", {})),
+                    prior_member_messages=[
+                        str(item.get("content", ""))
+                        for item in conversation.get("messages", [])[:-1]
+                        if item.get("role") == "user"
+                    ][-8:],
                 )
-            conversation_act = provider_analysis.conversation_act
-            if conversation_act == "unknown":
-                conversation_act = deterministic_analysis.conversation_act
-            active_goal_relation = provider_analysis.active_goal_relation
-            if active_goal_relation == "none":
-                active_goal_relation = deterministic_analysis.active_goal_relation
             sentiment = provider_analysis.sentiment
             sentiment_confidence = provider_analysis.sentiment_confidence
-            if sentiment == "unknown":
-                sentiment = deterministic_analysis.sentiment
-                sentiment_confidence = deterministic_analysis.sentiment_confidence
             self._apply_sentiment(
                 conversation, sentiment, sentiment_confidence
             )
             generation_output = {
-                "goal_count": len(goal_matches),
+                "skill_match_count": len(goal_matches),
                 "candidates": [
                     {
                         "skill": match.skill_name,
-                        "goal": match.goal,
                         "confidence": match.confidence,
                     }
                     for match in goal_matches
                 ],
-                "accepted_goal_count": len(accepted_matches),
+                "accepted_skill_match_count": len(accepted_matches),
                 "accepted_candidates": [
                     {
                         "skill": match.skill_name,
-                        "goal": match.goal,
                         "confidence": match.confidence,
                     }
                     for match in accepted_matches
@@ -880,6 +934,9 @@ class AgentRuntime:
                 ),
                 "conversation_act": conversation_act,
                 "active_goal_relation": active_goal_relation,
+                "understanding_mode": (
+                    "deterministic_fallback" if deterministic_turn else "semantic"
+                ),
                 "sentiment": sentiment,
                 "sentiment_confidence": sentiment_confidence,
                 "negative_sentiment_streak": conversation.get(
@@ -900,22 +957,21 @@ class AgentRuntime:
                 generation_output["rejected_slot_update_count"] = (
                     rejected_slot_updates
                 )
-            if canonicalized_provider_goals:
-                generation_output["canonicalized_provider_goal_count"] = (
-                    canonicalized_provider_goals
-                )
-            if rejected_provider_goals:
-                generation_output["rejected_provider_goal_count"] = (
-                    rejected_provider_goals
+            if rejected_provider_skills:
+                generation_output["rejected_provider_skill_count"] = (
+                    rejected_provider_skills
                 )
             generation.update(
                 output=generation_output,
                 metadata=provider_metadata,
             )
         self._ensure_member_profile(conversation)
-        goals = [match.as_dict() for match in accepted_matches]
+        goals = [
+            {**match.as_dict(), "goal": match.skill_name}
+            for match in accepted_matches
+        ]
         deterministic_goals = [
-            match.as_dict()
+            {**match.as_dict(), "goal": match.skill_name}
             for match in deterministic_matches
             if match.confidence >= GOAL_CONFIDENCE_THRESHOLD
         ]
@@ -1060,6 +1116,11 @@ class AgentRuntime:
             if not next_task or next_task.get("id") != pending_transition.get("task_id"):
                 conversation["pending_task_transition"] = None
             elif self._is_affirmative(message):
+                # The same semantic turn may confirm the transition and recover
+                # still-missing queued-task inputs from evidenced conversation
+                # history. Apply them before deterministic execution begins.
+                if slot_updates:
+                    next_task.setdefault("inputs", {}).update(slot_updates)
                 conversation["active_task"] = queued.pop(0)
                 conversation["pending_task_transition"] = None
                 conversation["selected_skill"] = next_task["skill_name"]
@@ -1193,7 +1254,30 @@ class AgentRuntime:
                     ],
                 )
                 return updates
-            updates.update(goals=[], next_action="supply_input")
+            if not slot_updates:
+                # Do not assign arbitrary raw text to the field that happens to
+                # be pending. The turn-understanding provider must establish the
+                # semantic field/value binding first; otherwise keep eliciting.
+                updates.update(
+                    goals=[],
+                    next_action="finalize",
+                    response_parts=[
+                        active.get("pending_question")
+                        or "Could you clarify the information for your current request?"
+                    ],
+                )
+                return updates
+            correction = bool(
+                conversation_act == "correction"
+                and any(
+                    field_name in active.get("inputs", {})
+                    and active.get("inputs", {}).get(field_name) != value
+                    for field_name, value in slot_updates.items()
+                )
+            )
+            updates.update(
+                goals=[], next_action="supply_input", slot_correction=correction
+            )
             return updates
 
         if conversation.get("awaiting_resume"):
@@ -1360,17 +1444,20 @@ class AgentRuntime:
             active_context = current or (
                 conversation["paused_tasks"][0] if conversation["paused_tasks"] else None
             )
-            handoff_inputs = handoff_goal.setdefault("inputs", {})
-            handoff_inputs.setdefault(
-                "active_goal",
-                active_context.get("goal", "general assistance")
-                if active_context
-                else "general assistance",
-            )
-            handoff_inputs.setdefault(
-                "completed_steps",
-                active_context.get("completed_steps", []) if active_context else [],
-            )
+            handoff_goal["context"] = {
+                "prior_task": {
+                    "goal": (
+                        active_context.get("goal", "general assistance")
+                        if active_context
+                        else "general assistance"
+                    ),
+                    "completed_steps": (
+                        list(active_context.get("completed_steps", []))
+                        if active_context
+                        else []
+                    ),
+                }
+            }
 
         valid_goals.sort(
             key=lambda goal: RISK_ORDER[routes[goal["skill_name"]].risk_tier]
@@ -1398,8 +1485,8 @@ class AgentRuntime:
             first_label = self._goal_label(tasks[0]["skill_name"], tasks[0]["goal"])
             next_label = self._goal_label(tasks[1]["skill_name"], tasks[1]["goal"])
             response_parts.append(
-                "I can help with both. I'll start by helping you {}. When that's "
-                "complete, I'll ask before continuing to {}.".format(
+                "I can help with both. I'll start by helping you {}, then continue "
+                "by helping you {}.".format(
                     first_label, next_label
                 )
             )
@@ -1427,8 +1514,8 @@ class AgentRuntime:
             }
         inputs_before = dict(task.get("inputs", {}))
         if state.get("slot_correction"):
-            # A correction at confirmation invalidates the old review. Re-run the
-            # declarative workflow from the beginning with the corrected inputs.
+            # A correction invalidates prior derived variables and review state.
+            # Re-run the pinned declarative workflow with the corrected inputs.
             task["workflow_step"] = 0
             task["variables"] = {}
             task["completed_steps"] = []
@@ -1437,14 +1524,7 @@ class AgentRuntime:
             task["outcome"] = None
             conversation["confirmation_status"] = "not_required"
         slot_updates = dict(state.get("slot_updates", {}))
-        if slot_updates:
-            task.setdefault("inputs", {}).update(slot_updates)
-        else:
-            executor.collect_input(
-                task,
-                state["incoming_message"],
-                self._skill_context(state, definition),
-            )
+        task.setdefault("inputs", {}).update(slot_updates)
         task["status"] = "ready"
         conversation["pending_clarification"] = None
         changed = {
@@ -1542,18 +1622,30 @@ class AgentRuntime:
                 conversation["confirmation_status"] = "pending"
             return {
                 "conversation": conversation,
-                "response_parts": ["Resuming your {} request. {}".format(task["goal"], question or "")],
+                "response_parts": [
+                    "Resuming your {} request. {}".format(
+                        self._task_label(task), question or ""
+                    )
+                ],
             }
 
         discarded = paused.pop(0)
         conversation["awaiting_resume"] = bool(paused)
         conversation["outcome"] = {"status": "discarded", "task_id": discarded["id"]}
         suffix = (
-            " Would you like to resume or discard the next paused task?" if paused else ""
+            " Would you like to resume or discard your paused {} request?".format(
+                self._task_label(paused[0])
+            )
+            if paused
+            else ""
         )
         return {
             "conversation": conversation,
-            "response_parts": ["I discarded the paused {} request.{}".format(discarded["goal"], suffix)],
+            "response_parts": [
+                "I discarded the paused {} request.{}".format(
+                    self._task_label(discarded), suffix
+                )
+            ],
         }
 
     def _check_policy(self, state: WorkflowState) -> Dict[str, Any]:
@@ -1798,14 +1890,20 @@ class AgentRuntime:
             conversation["active_task"] = None
 
         if conversation["queued_tasks"]:
-            transition = self._new_task_transition(conversation["queued_tasks"][0])
-            conversation["pending_task_transition"] = transition
+            # These tasks came from work the member already requested in the
+            # same objective. Advancing them is not a new consent boundary;
+            # each task still enforces its own policy and confirmation gates.
+            next_task = conversation["queued_tasks"].pop(0)
+            next_task["status"] = next_task.pop("resume_status", "ready")
+            conversation["active_task"] = next_task
+            conversation["selected_skill"] = next_task["skill_name"]
+            conversation["outcome"] = None
+            conversation["pending_task_transition"] = None
             conversation["confirmation_status"] = "not_required"
             return {
                 "conversation": conversation,
-                "response_parts": state.get("response_parts", [])
-                + [transition["question"]],
-                "next_action": "finalize",
+                "response_parts": state.get("response_parts", []),
+                "next_action": "policy",
             }
 
         response_parts = state.get("response_parts", [])
@@ -1814,7 +1912,7 @@ class AgentRuntime:
             paused = conversation["paused_tasks"][0]
             response_parts = response_parts + [
                 "Would you like to resume or discard your paused {} request?".format(
-                    paused["goal"]
+                    self._task_label(paused)
                 )
             ]
         return {
@@ -1853,6 +1951,9 @@ class AgentRuntime:
             provider=self.provider,
             observability=self.observability,
             member_profile=dict(state["conversation"].get("member_profile", {})),
+            execution_context=dict(
+                (state["conversation"].get("active_task") or {}).get("context", {})
+            ),
         )
 
     @staticmethod
@@ -1871,6 +1972,7 @@ class AgentRuntime:
             "outcome": None,
             "workflow_step": 0,
             "variables": {},
+            "context": dict(goal.get("context", {})),
         }
 
     @staticmethod
@@ -1891,7 +1993,7 @@ class AgentRuntime:
     def _normalize_input_updates(
         updates: Dict[str, Any], route: SkillRoutingDefinition
     ) -> Dict[str, Any]:
-        """Keep only schema-declared, bounded values from semantic interpretation."""
+        """Keep only values accepted by the skill's declared input schema."""
 
         properties = route.input_schema.get("properties", {})
         normalized: Dict[str, Any] = {}
@@ -1904,18 +2006,39 @@ class AgentRuntime:
                 if isinstance(value, (dict, list, tuple, set)):
                     continue
                 text = " ".join(str(value).split())
-                if text:
-                    normalized[field_name] = text[:500]
+                if not text:
+                    continue
+                candidate: Any = text[:500]
             elif expected_type == "array" and isinstance(value, list):
-                normalized[field_name] = value[:50]
+                candidate = value[:50]
             elif expected_type == "object" and isinstance(value, dict):
-                normalized[field_name] = dict(value)
+                candidate = dict(value)
             elif expected_type in {"number", "integer"} and isinstance(
                 value, (int, float, str)
             ):
-                normalized[field_name] = value
+                try:
+                    candidate = float(value)
+                    if expected_type == "integer":
+                        if not candidate.is_integer():
+                            continue
+                        candidate = int(candidate)
+                except (TypeError, ValueError):
+                    continue
             elif expected_type == "boolean" and isinstance(value, bool):
-                normalized[field_name] = value
+                candidate = value
+            else:
+                continue
+            enum = field.get("enum")
+            if isinstance(enum, list) and candidate not in enum:
+                continue
+            pattern = field.get("pattern")
+            if isinstance(pattern, str) and isinstance(candidate, str):
+                try:
+                    if re.fullmatch(pattern, candidate) is None:
+                        continue
+                except re.error:
+                    continue
+            normalized[field_name] = candidate
         return normalized
 
     @classmethod
@@ -1923,12 +2046,48 @@ class AgentRuntime:
         cls,
         updates: List[SlotUpdate],
         route: SkillRoutingDefinition,
+        *,
+        pending_field: str = "",
+        conversation_act: str = "unknown",
+        current_inputs: Optional[Dict[str, Any]] = None,
+        prior_member_messages: Optional[List[str]] = None,
     ) -> tuple:
         accepted: Dict[str, Any] = {}
         confidences: Dict[str, float] = {}
+        existing = dict(current_inputs or {})
+        prior_member_text = [
+            " ".join(message.casefold().split())
+            for message in (prior_member_messages or [])
+        ]
         rejected = 0
         for update in updates:
             confidence = max(0.0, min(1.0, float(update.confidence)))
+            binding = str(update.binding or "inferred").strip().casefold()
+            if binding not in {
+                "pending_answer",
+                "explicit",
+                "correction",
+                "context_recovery",
+            }:
+                rejected += 1
+                continue
+            if binding == "pending_answer" and (
+                not pending_field or str(update.field) != pending_field
+            ):
+                rejected += 1
+                continue
+            if binding == "correction" and conversation_act != "correction":
+                rejected += 1
+                continue
+            if binding == "context_recovery":
+                evidence = " ".join(str(update.evidence or "").casefold().split())
+                if (
+                    existing.get(str(update.field)) not in {None, ""}
+                    or not evidence
+                    or not any(evidence in message for message in prior_member_text)
+                ):
+                    rejected += 1
+                    continue
             normalized = cls._normalize_input_updates(
                 {str(update.field): update.value}, route
             )
@@ -1942,56 +2101,29 @@ class AgentRuntime:
         return accepted, rejected
 
     @classmethod
-    def _normalize_goal_matches(
+    def _normalize_skill_matches(
         cls,
-        matches: List[GoalMatch],
+        matches: List[SkillMatch],
         catalog: List[SkillRoutingDefinition],
     ) -> tuple:
-        """Constrain provider output to catalog goals and canonicalize safe labels.
-
-        Semantic providers can occasionally return a goal's business-facing
-        ``display_name`` instead of its stable ``name``. A unique display-name
-        match within the selected skill is safe to canonicalize; every other
-        undeclared goal is rejected before routing.
-        """
+        """Constrain provider output to active skills and declared input schemas."""
 
         routes = {route.name: route for route in catalog}
-        normalized: List[GoalMatch] = []
-        canonicalized = 0
+        normalized: List[SkillMatch] = []
         rejected = 0
         for match in matches:
             route = routes.get(match.skill_name)
             if route is None:
                 rejected += 1
                 continue
-            declared = {
-                str(goal["name"]): goal for goal in route.supported_goals
-            }
-            canonical_goal = match.goal if match.goal in declared else None
-            if canonical_goal is None:
-                label = " ".join(str(match.goal).casefold().split())
-                label_matches = [
-                    name
-                    for name, goal in declared.items()
-                    if " ".join(
-                        str(goal.get("display_name", "")).casefold().split()
-                    )
-                    == label
-                ]
-                if len(label_matches) != 1:
-                    rejected += 1
-                    continue
-                canonical_goal = label_matches[0]
-                canonicalized += 1
             normalized.append(
-                GoalMatch(
+                SkillMatch(
                     skill_name=match.skill_name,
-                    goal=canonical_goal,
                     confidence=max(0.0, min(1.0, float(match.confidence))),
                     inputs=cls._normalize_input_updates(dict(match.inputs), route),
                 )
             )
-        return normalized, canonicalized, rejected
+        return normalized, 0, rejected
 
     @classmethod
     def _normalize_goal_dicts(
@@ -2000,40 +2132,41 @@ class AgentRuntime:
         catalog: List[SkillRoutingDefinition],
     ) -> tuple:
         matches = [
-            GoalMatch(
+            SkillMatch(
                 skill_name=str(goal.get("skill_name", "")),
-                goal=str(goal.get("goal", "")),
                 confidence=float(goal.get("confidence", 0.0)),
                 inputs=dict(goal.get("inputs", {})),
             )
             for goal in goals
         ]
-        normalized, canonicalized, rejected = cls._normalize_goal_matches(
+        normalized, canonicalized, rejected = cls._normalize_skill_matches(
             matches, catalog
         )
-        merged = cls._merge_goal_matches(normalized, [])
+        merged = cls._merge_skill_matches(normalized, [])
         return (
-            [match.as_dict() for match in merged],
+            [{**match.as_dict(), "goal": match.skill_name} for match in merged],
             canonicalized,
             rejected,
         )
 
     @staticmethod
-    def _merge_goal_matches(
-        provider_matches: List[GoalMatch], deterministic_matches: List[GoalMatch]
-    ) -> List[GoalMatch]:
-        merged: Dict[tuple, GoalMatch] = {}
+    def _merge_skill_matches(
+        provider_matches: List[SkillMatch], deterministic_matches: List[SkillMatch]
+    ) -> List[SkillMatch]:
+        merged: Dict[str, SkillMatch] = {}
         for match in provider_matches + deterministic_matches:
-            key = (match.skill_name, match.goal)
+            key = match.skill_name
             existing = merged.get(key)
             if existing is None:
                 merged[key] = match
                 continue
-            merged[key] = GoalMatch(
+            merged[key] = SkillMatch(
                 skill_name=match.skill_name,
-                goal=match.goal,
                 confidence=max(existing.confidence, match.confidence),
-                inputs={**existing.inputs, **match.inputs},
+                # The semantic provider is first in the merge order. Let the
+                # deterministic router supplement missing inputs, but never
+                # overwrite the provider's field/value interpretation.
+                inputs={**match.inputs, **existing.inputs},
             )
         return sorted(merged.values(), key=lambda item: item.confidence, reverse=True)
 
@@ -2056,12 +2189,18 @@ class AgentRuntime:
             for goal in deterministic_goals
             if not self._is_handoff_goal(goal, catalog)
         }
-        if self._is_explicit_multi_goal(message) and len(deterministic_keys) > 1:
-            selected = [
-                goal
-                for goal in goals
-                if (goal["skill_name"], goal["goal"]) in deterministic_keys
-            ]
+        if self._is_explicit_multi_goal(message) and (
+            len(deterministic_keys) > 1 or len(goals) > 1
+        ):
+            selected = (
+                [
+                    goal
+                    for goal in goals
+                    if (goal["skill_name"], goal["goal"]) in deterministic_keys
+                ]
+                if len(deterministic_keys) > 1
+                else goals
+            )
             conversation["pending_goal_clarification"] = None
             conversation["no_goal_turn_count"] = 0
             updates.update(goals=selected, next_action="plan")
@@ -2108,6 +2247,8 @@ class AgentRuntime:
             candidates
         ) == 1:
             return [candidates[0]]
+        if normalized in {"both", "both please", "all of them"} and len(candidates) > 1:
+            return candidates
         if normalized in {"first", "first one", "option one", "one"} and candidates:
             return [candidates[0]]
         if normalized in {"second", "second one", "option two", "two"} and len(candidates) > 1:
@@ -2121,6 +2262,8 @@ class AgentRuntime:
             }:
                 matching.append(goal)
         if len(matching) == 1:
+            return matching
+        if len(matching) > 1 and AgentRuntime._is_explicit_multi_goal(message):
             return matching
 
         message_tokens = set(normalized.split())
@@ -2233,12 +2376,14 @@ class AgentRuntime:
             return None
         return {
             "skill_name": definition.name,
-            "goal": definition.supported_goals[0]["name"],
+            "goal": definition.name,
             "confidence": 1.0,
-            "inputs": {
-                **dict(offer.get("inputs", {})),
-                "active_goal": offer["active_goal"],
-                "completed_steps": list(offer.get("completed_steps", [])),
+            "inputs": dict(offer.get("inputs", {})),
+            "context": {
+                "prior_task": {
+                    "goal": offer["active_goal"],
+                    "completed_steps": list(offer.get("completed_steps", [])),
+                }
             },
         }
 
@@ -2373,10 +2518,8 @@ class AgentRuntime:
             # turn threshold; it is not proactively advertised by the receptionist.
             if skill.risk_tier == "handoff":
                 continue
-            for goal in skill.supported_goals:
-                label = self._goal_label(skill.name, str(goal["name"]))
-                if label not in labels:
-                    labels.append(label)
+            if skill.display_name not in labels:
+                labels.append(skill.display_name)
         return labels
 
     @staticmethod
@@ -2461,7 +2604,7 @@ class AgentRuntime:
     @staticmethod
     def _is_explicit_multi_goal(message: str) -> bool:
         return bool(
-            re.search(r"\b(and|also|then|as well as|but)\b", message.casefold())
+            re.search(r"\b(and|also|then|as well as|but|both)\b", message.casefold())
         )
 
     def _goal_label(self, skill_name: str, goal_name: str) -> str:
@@ -2469,20 +2612,11 @@ class AgentRuntime:
             (route for route in self.catalog.routes() if route.name == skill_name), None
         )
         if definition:
-            goal = next(
-                (
-                    candidate
-                    for candidate in definition.supported_goals
-                    if candidate.get("name") == goal_name
-                ),
-                None,
-            )
-            if goal and goal.get("display_name"):
-                return str(goal["display_name"])
+            return definition.display_name
         return goal_name.replace("_", " ")
 
     def _new_task_transition(self, task: TaskState) -> Dict[str, str]:
-        label = self._goal_label(task["skill_name"], task["goal"])
+        label = self._task_label(task)
         return {
             "task_id": task["id"],
             "goal_label": label,
@@ -2490,6 +2624,12 @@ class AgentRuntime:
                 "That request is complete. Would you like me to continue and {}?"
             ).format(label),
         }
+
+    def _task_label(self, task: TaskState) -> str:
+        definition = self._task_definition(task)
+        if definition is not None:
+            return definition.display_name
+        return self._goal_label(task["skill_name"], task["goal"])
 
     def _confirmation_copy(self, task: TaskState, key: str, default: str) -> str:
         definition = self._task_definition(task)

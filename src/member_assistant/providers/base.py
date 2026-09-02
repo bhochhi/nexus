@@ -59,16 +59,16 @@ class ProviderSafetyError(ProviderError):
 
 
 @dataclass(frozen=True)
-class GoalMatch:
+class SkillMatch:
+    """A discovery-time selection of one single-goal skill."""
+
     skill_name: str
-    goal: str
     confidence: float
     inputs: Dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> Dict[str, Any]:
         return {
             "skill_name": self.skill_name,
-            "goal": self.goal,
             "confidence": self.confidence,
             "inputs": dict(self.inputs),
         }
@@ -97,13 +97,18 @@ class SlotUpdate:
     field: str
     value: Any
     confidence: float
+    binding: str = "inferred"
+    evidence: str = ""
 
 
 @dataclass(frozen=True)
 class TurnAnalysis:
     """Provider-neutral semantic interpretation of one member turn."""
 
-    goals: List[GoalMatch] = field(default_factory=list)
+    skill_matches: List[SkillMatch] = field(default_factory=list)
+    # Transitional constructor/read compatibility for provider extensions that
+    # still use the old name. New platform code consumes skill_matches.
+    goals: List[SkillMatch] = field(default_factory=list, repr=False)
     skill_gap: Optional[SkillGap] = None
     slot_updates: List[SlotUpdate] = field(default_factory=list)
     conversation_act: str = "unknown"
@@ -113,17 +118,31 @@ class TurnAnalysis:
     safety_intervened: bool = False
     safety_response: Optional[str] = None
 
+    def __post_init__(self) -> None:
+        if self.goals and not self.skill_matches:
+            object.__setattr__(self, "skill_matches", list(self.goals))
+        elif self.skill_matches and not self.goals:
+            object.__setattr__(self, "goals", list(self.skill_matches))
+
 
 class ModelProvider(ABC):
     """All provider-specific behavior is constrained to implementations here."""
 
     name = "unknown"
     model_id = "unknown"
+    semantic_turn_understanding = False
 
     def observability_metadata(self) -> Dict[str, Any]:
         """Describe the most recent call without exposing prompt content."""
 
-        return {"provider": self.name, "model": self.model_id, "fallback_used": False}
+        return {
+            "provider": self.name,
+            "model": self.model_id,
+            "fallback_used": False,
+            "understanding_mode": (
+                "semantic" if self.semantic_turn_understanding else "deterministic"
+            ),
+        }
 
     def understand_turn(
         self,
@@ -133,21 +152,33 @@ class ModelProvider(ABC):
     ) -> TurnAnalysis:
         """Understand objectives, task-relative inputs, and optional gaps.
 
-        Offline providers can return only goal matches. Semantic providers can additionally
+        Offline providers can return only skill matches. Semantic providers can additionally
         extract every supplied or corrected input for the active task. Execution, validation,
         and confirmation remain outside this contract.
         """
 
-        return TurnAnalysis(goals=self.identify_goals(message, catalog, context))
+        return TurnAnalysis(
+            skill_matches=self.identify_skills(message, catalog, context)
+        )
 
     @abstractmethod
+    def identify_skills(
+        self,
+        message: str,
+        catalog: Sequence[SkillRoutingDefinition],
+        context: Optional[Mapping[str, Any]] = None,
+    ) -> List[SkillMatch]:
+        raise NotImplementedError
+
     def identify_goals(
         self,
         message: str,
         catalog: Sequence[SkillRoutingDefinition],
         context: Optional[Mapping[str, Any]] = None,
-    ) -> List[GoalMatch]:
-        raise NotImplementedError
+    ) -> List[SkillMatch]:
+        """Backward-compatible name for callers that have not migrated yet."""
+
+        return self.identify_skills(message, catalog, context)
 
     @abstractmethod
     def generate_response(self, instruction: str, facts: Dict[str, Any]) -> str:

@@ -19,3 +19,5 @@ graphify-out/cost.json
 graphify-out/.graphify_analysis.json
 graphify-out/.graphify_labels.json
 graphify-out/.graphify_*
+graphify-out/.vocab.txt
+graphify-out/20??-??-??/

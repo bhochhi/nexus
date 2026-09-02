@@ -127,9 +127,10 @@ def test_pretty_console_trace_highlights_provider_and_fallback_status():
                 "fallback_used": False,
             },
             "output": {
-                "candidates": [
-                    {"skill": "approved_knowledge", "confidence": 0.92}
-                ]
+            "candidates": [
+                {"skill": "approved_knowledge", "confidence": 0.92}
+            ],
+            "rejected_provider_skill_count": 2,
             },
         },
         color=False,
@@ -142,3 +143,4 @@ def test_pretty_console_trace_highlights_provider_and_fallback_status():
     assert "reasoning=low" in rendered
     assert "fallback=no" in rendered
     assert "approved_knowledge@0.92" in rendered
+    assert "invalid_skills=2" in rendered

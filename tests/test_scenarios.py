@@ -3,8 +3,8 @@ from decimal import Decimal
 from member_assistant.config import PROJECT_ROOT
 from member_assistant.providers import (
     DeterministicProvider,
-    GoalMatch,
     SkillGap,
+    SkillMatch,
     SlotUpdate,
     TurnAnalysis,
 )
@@ -14,17 +14,18 @@ from member_assistant.tools.accounts import AccountBalance
 class _NoisyBalanceProvider(DeterministicProvider):
     """Simulates an LLM that speculatively fills account from the intent text."""
 
-    def identify_goals(self, message, catalog, context=None):
+    semantic_turn_understanding = True
+
+    def identify_skills(self, message, catalog, context=None):
         if "balance" in message.casefold():
             return [
-                GoalMatch(
+                SkillMatch(
                     skill_name="guided_balance",
-                    goal="check_account_balance",
                     confidence=0.99,
                     inputs={"account": "balance"},
                 )
             ]
-        return super().identify_goals(message, catalog, context)
+        return super().identify_skills(message, catalog, context)
 
 
 class _GapAwareProvider(DeterministicProvider):
@@ -58,16 +59,15 @@ class _CapabilityGapProvider(DeterministicProvider):
         return super().understand_turn(message, catalog, context)
 
 
-class _DisplayNameGoalProvider(DeterministicProvider):
-    """Simulates a semantic model returning a friendly label as the goal ID."""
+class _UnknownSkillProvider(DeterministicProvider):
+    """Simulates a semantic model returning a skill absent from the catalog."""
 
     def understand_turn(self, message, catalog, context=None):
         if "online id" in message.casefold():
             return TurnAnalysis(
                 goals=[
-                    GoalMatch(
+                    SkillMatch(
                         skill_name="online_id_recovery",
-                        goal="recover your online ID",
                         confidence=0.86,
                     )
                 ]
@@ -78,36 +78,54 @@ class _DisplayNameGoalProvider(DeterministicProvider):
 class _NaturalTurnProvider(DeterministicProvider):
     """Models semantic multi-slot extraction and natural-number normalization."""
 
+    semantic_turn_understanding = True
+
     def understand_turn(self, message, catalog, context=None):
         analysis = super().understand_turn(message, catalog, context)
         normalized = message.casefold()
         slot_updates = list(analysis.slot_updates)
         conversation_act = analysis.conversation_act
         relation = analysis.active_goal_relation
-        if "from saving to checking" in normalized:
+        if "from savings 2002 to checking 1001" in normalized:
             slot_updates.extend(
                 [
-                    SlotUpdate("source_account", "savings", 1.0),
-                    SlotUpdate("destination_account", "checking", 1.0),
+                    SlotUpdate(
+                        "source_account", "savings 2002", 1.0, "pending_answer"
+                    ),
+                    SlotUpdate(
+                        "destination_account", "checking 1001", 1.0, "explicit"
+                    ),
                 ]
             )
             conversation_act = "provide_information"
             relation = "continue"
         if "two hundred" in normalized:
-            slot_updates.append(SlotUpdate("amount", "200.00", 1.0))
+            slot_updates.append(
+                SlotUpdate(
+                    "amount",
+                    "200.00",
+                    1.0,
+                    "correction" if "actually" in normalized else "pending_answer",
+                )
+            )
             conversation_act = (
                 "correction" if "actually" in normalized else "provide_information"
             )
             relation = "continue"
         if "one hundreds" in normalized:
-            slot_updates.append(SlotUpdate("amount", "100.00", 0.98))
+            slot_updates.append(SlotUpdate("amount", "100.00", 0.98, "pending_answer"))
             conversation_act = "provide_information"
             relation = "continue"
         if "checking ending in 1001" in normalized:
             slot_updates.extend(
                 [
-                    SlotUpdate("source_account", "checking", 0.99),
-                    SlotUpdate("amount", "1001", 0.20),
+                    SlotUpdate(
+                        "source_account",
+                        "checking ending in 1001",
+                        0.99,
+                        "pending_answer",
+                    ),
+                    SlotUpdate("amount", "1001", 0.20, "explicit"),
                 ]
             )
             conversation_act = "provide_information"
@@ -119,6 +137,168 @@ class _NaturalTurnProvider(DeterministicProvider):
             conversation_act=conversation_act,
             active_goal_relation=relation,
         )
+
+
+class _SemanticBindingProvider(_NaturalTurnProvider):
+    """Exercises generic pending-answer and correction controls."""
+
+    def understand_turn(self, message, catalog, context=None):
+        normalized = message.casefold().strip()
+        if normalized == "1002" and (context or {}).get("missing_field") == "destination_account":
+            return TurnAnalysis(
+                slot_updates=[
+                    SlotUpdate(
+                        "destination_account", "1002", 0.99, "pending_answer"
+                    ),
+                    SlotUpdate("amount", "1002", 0.20, "explicit"),
+                ],
+                conversation_act="provide_information",
+                active_goal_relation="continue",
+            )
+        if "actually use checking 1003 for source" in normalized:
+            if "make it 75" in normalized:
+                return TurnAnalysis(
+                    slot_updates=[
+                        SlotUpdate(
+                            "source_account", "checking 1003", 0.99, "correction"
+                        ),
+                        SlotUpdate("amount", "75.00", 0.99, "explicit"),
+                    ],
+                    conversation_act="correction",
+                    active_goal_relation="continue",
+                )
+            return TurnAnalysis(
+                slot_updates=[
+                    SlotUpdate(
+                        "source_account", "checking 1003", 0.99, "correction"
+                    )
+                ],
+                conversation_act="correction",
+                active_goal_relation="continue",
+            )
+        return super().understand_turn(message, catalog, context)
+
+
+class _SemanticInitialGoalProvider(DeterministicProvider):
+    """Returns semantic goal inputs that conflict with shape-based extraction."""
+
+    semantic_turn_understanding = True
+
+    def understand_turn(self, message, catalog, context=None):
+        if "make it $50" in message.casefold():
+            return TurnAnalysis(
+                goals=[
+                    SkillMatch(
+                        skill_name="internal_transfer",
+                        confidence=0.99,
+                        inputs={
+                            "source_account": "savings 2003",
+                            "destination_account": "checking 1002",
+                            "amount": "50.00",
+                        },
+                    )
+                ],
+                conversation_act="new_goal",
+            )
+        return super().understand_turn(message, catalog, context)
+
+
+class _NoSlotSemanticProvider(DeterministicProvider):
+    """Simulates an LLM declining to bind an ambiguous-looking reply."""
+
+    semantic_turn_understanding = True
+
+    def understand_turn(self, message, catalog, context=None):
+        if message.strip() == "1002":
+            return TurnAnalysis(
+                conversation_act="provide_information",
+                active_goal_relation="continue",
+            )
+        return super().understand_turn(message, catalog, context)
+
+
+class _ContextAwareSemanticProvider(DeterministicProvider):
+    """Uses bounded conversation state to resolve an ordinal reference."""
+
+    semantic_turn_understanding = True
+
+    def __init__(self):
+        super().__init__()
+        self.reference_context = {}
+
+    def understand_turn(self, message, catalog, context=None):
+        if message.casefold().strip() == "the second one":
+            self.reference_context = dict(context or {})
+            return TurnAnalysis(
+                slot_updates=[
+                    SlotUpdate(
+                        "destination_account", "1002", 0.99, "pending_answer"
+                    )
+                ],
+                conversation_act="provide_information",
+                active_goal_relation="continue",
+            )
+        return super().understand_turn(message, catalog, context)
+
+
+class _QueuedHistoryRecoveryProvider(DeterministicProvider):
+    """Recovers initially missed queued-goal inputs from member evidence."""
+
+    semantic_turn_understanding = True
+
+    def understand_turn(self, message, catalog, context=None):
+        normalized = message.casefold()
+        if "check checking 1001" in normalized and "then transfer" in normalized:
+            return TurnAnalysis(
+                goals=[
+                    SkillMatch(
+                        "guided_balance",
+                        0.99,
+                        {"account_type": "checking", "account_number": "1001"},
+                    ),
+                    # Simulate the model recognizing the second goal but missing
+                    # its values during initial extraction.
+                    SkillMatch(
+                        "internal_transfer",
+                        0.98,
+                        {},
+                    ),
+                ],
+                conversation_act="new_goal",
+            )
+        if (
+            normalized.strip() == "yes"
+            and (context or {}).get("active_skill") == "internal_transfer"
+            and (context or {}).get("pending_task_transition")
+        ):
+            return TurnAnalysis(
+                slot_updates=[
+                    SlotUpdate(
+                        "source_account",
+                        "savings 2003",
+                        0.99,
+                        "context_recovery",
+                        "savings 2003",
+                    ),
+                    SlotUpdate(
+                        "destination_account",
+                        "checking 1002",
+                        0.99,
+                        "context_recovery",
+                        "checking 1002",
+                    ),
+                    SlotUpdate(
+                        "amount",
+                        "50.00",
+                        0.99,
+                        "context_recovery",
+                        "$50",
+                    ),
+                ],
+                conversation_act="confirmation",
+                active_goal_relation="continue",
+            )
+        return super().understand_turn(message, catalog, context)
 
 
 def test_grounded_faq_uses_approved_source(runtime_factory):
@@ -143,7 +323,10 @@ def test_speculative_model_slot_uses_neutral_elicitation_then_validates_reply(
     assert "couldn't match" not in prompt.text
 
     invalid = runtime.chat("neutral-slot", "my mystery account")
-    assert "I couldn't match that account" in invalid.text
+    assert "Which account type would you like" in invalid.text
+    assert "account_type" not in runtime.inspect_state("neutral-slot")[
+        "active_task"
+    ]["inputs"]
 
     completed = runtime.chat("neutral-slot", "2002")
     assert "$8,250.25" in completed.text
@@ -260,7 +443,7 @@ def test_transfer_requires_a_specific_account_when_type_has_multiple_accounts(
 def test_transfer_lists_eligible_accounts_for_an_ambiguous_account_type(
     runtime_factory,
 ):
-    runtime = runtime_factory()
+    runtime = runtime_factory(provider=_SemanticBindingProvider())
 
     runtime.chat("transfer-account-choice", "I want to make a transfer")
     runtime.chat("transfer-account-choice", "savings 2003")
@@ -271,17 +454,120 @@ def test_transfer_lists_eligible_accounts_for_an_ambiguous_account_type(
     assert "Checking ending in 1002" in choices.text
     assert "Checking ending in 1003" in choices.text
 
-    amount = runtime.chat("transfer-account-choice", "1003")
+    amount = runtime.chat("transfer-account-choice", "1002")
     assert "How much would you like to transfer" in amount.text
+    state = runtime.inspect_state("transfer-account-choice")
+    assert state["active_task"]["inputs"]["destination_account"] == "1002"
+    assert "amount" not in state["active_task"]["inputs"]
 
     review = runtime.chat("transfer-account-choice", "$200")
     assert "Savings ending in 2003" in review.text
+    assert "Checking ending in 1002" in review.text
+
+
+def test_runtime_does_not_blindly_bind_raw_text_when_semantics_return_no_slot(
+    runtime_factory,
+):
+    runtime = runtime_factory(provider=_NoSlotSemanticProvider())
+
+    runtime.chat("no-raw-slot", "I want to make a transfer")
+    runtime.chat("no-raw-slot", "savings 2003")
+    choices = runtime.chat("no-raw-slot", "checking")
+    retry = runtime.chat("no-raw-slot", "1002")
+
+    assert retry.text == choices.text
+    state = runtime.inspect_state("no-raw-slot")
+    assert state["active_task"]["missing_field"] == "destination_account"
+    assert "destination_account" not in state["active_task"]["inputs"]
+    assert "amount" not in state["active_task"]["inputs"]
+
+
+def test_semantic_provider_can_resolve_slot_from_bounded_conversation_context(
+    runtime_factory,
+):
+    provider = _ContextAwareSemanticProvider()
+    runtime = runtime_factory(provider=provider)
+
+    runtime.chat("contextual-slot", "I want to make a transfer")
+    runtime.chat("contextual-slot", "savings 2003")
+    choices = runtime.chat("contextual-slot", "checking")
+    amount = runtime.chat("contextual-slot", "the second one")
+
+    assert "Checking ending in 1002" in choices.text
+    assert "How much would you like to transfer" in amount.text
+    assert "1002" in provider.reference_context["pending_question"]
+    assert provider.reference_context["missing_field"] == "destination_account"
+    assert any(
+        item["role"] == "assistant" and "Checking ending in 1002" in item["content"]
+        for item in provider.reference_context["recent_messages"]
+    )
+
+
+def test_semantic_slot_correction_restarts_validation_while_collecting_input(
+    runtime_factory,
+):
+    runtime = runtime_factory(provider=_SemanticBindingProvider())
+
+    runtime.chat("collecting-correction", "I want to make a transfer")
+    runtime.chat("collecting-correction", "checking 1001")
+    amount = runtime.chat("collecting-correction", "savings 2002")
+    assert "How much would you like to transfer" in amount.text
+
+    corrected = runtime.chat(
+        "collecting-correction", "actually use checking 1003 for source"
+    )
+    assert "How much would you like to transfer" in corrected.text
+    state = runtime.inspect_state("collecting-correction")
+    assert state["active_task"]["inputs"]["source_account"] == "checking 1003"
+
+    review = runtime.chat("collecting-correction", "$50")
     assert "Checking ending in 1003" in review.text
+    assert "Savings ending in 2002" in review.text
+
+
+def test_semantic_correction_can_update_and_fill_multiple_slots(runtime_factory):
+    runtime = runtime_factory(provider=_SemanticBindingProvider())
+
+    runtime.chat("multi-correction", "I want to make a transfer")
+    runtime.chat("multi-correction", "checking 1001")
+    runtime.chat("multi-correction", "savings 2002")
+    review = runtime.chat(
+        "multi-correction",
+        "actually use checking 1003 for source and make it 75 dollars",
+    )
+
+    assert "$75.00" in review.text
+    assert "Checking ending in 1003" in review.text
+    assert "Savings ending in 2002" in review.text
+    assert runtime.inspect_state("multi-correction")["active_task"]["inputs"] == {
+        "source_account": "checking 1003",
+        "destination_account": "savings 2002",
+        "amount": "75.00",
+    }
+
+
+def test_semantic_goal_inputs_override_shape_based_fallback_extraction(
+    runtime_factory,
+):
+    runtime = runtime_factory(provider=_SemanticInitialGoalProvider())
+
+    review = runtime.chat(
+        "semantic-initial",
+        "Transfer from savings 2003 to checking 1002; make it $50",
+    )
+
+    assert "Review mock transfer: $50.00" in review.text
+    assert "Savings ending in 2003" in review.text
+    assert "Checking ending in 1002" in review.text
+    assert "$2003.00" not in review.text
 
 
 def test_pending_transfer_confirmation_survives_restart(runtime_factory):
     first_runtime = runtime_factory(db_name="confirmation.db")
-    first_runtime.chat("confirmation", "Transfer $12 from checking to savings")
+    first_runtime.chat("confirmation", "I want to make a transfer")
+    first_runtime.chat("confirmation", "checking 1001")
+    first_runtime.chat("confirmation", "savings 2002")
+    first_runtime.chat("confirmation", "$12")
     first_runtime.close()
 
     second_runtime = runtime_factory(db_name="confirmation.db")
@@ -295,40 +581,68 @@ def test_multi_goal_orders_read_only_before_consequential(runtime_factory):
     runtime = runtime_factory()
 
     first = runtime.chat(
-        "multi", "Check my balance and transfer $25 from checking to savings"
+        "multi",
+        "Transfer $25 from chk-002 to sav-001 and check my chk-001 balance",
     )
     assert "$2,450.75" in first.text
     assert "I'll start by helping you check an account balance" in first.text
-    assert "Would you like me to continue and make an internal transfer" in first.text
-    assert "Review mock transfer" not in first.text
+    assert "then continue by helping you make an internal transfer" in first.text
+    assert "Would you like me to continue" not in first.text
+    assert "Review mock transfer" in first.text
     assert runtime.tools.transfers.submission_count == 0
-    state = runtime.inspect_state("multi")
-    assert state["active_task"] is None
-    assert state["queued_tasks"][0]["skill_name"] == "internal_transfer"
-    assert state["pending_task_transition"] is not None
-
-    second = runtime.chat("multi", "yes")
-    assert "Review mock transfer" in second.text
     state = runtime.inspect_state("multi")
     assert state["active_task"]["skill_name"] == "internal_transfer"
     assert state["active_task"]["status"] == "awaiting_confirmation"
+    assert state["queued_tasks"] == []
+    assert state["pending_task_transition"] is None
 
-    third = runtime.chat("multi", "yes")
-    assert "Mock transfer completed" in third.text
+    second = runtime.chat("multi", "yes")
+    assert "Mock transfer completed" in second.text
     assert runtime.tools.transfers.submission_count == 1
 
 
-def test_member_can_decline_the_next_planned_goal(runtime_factory):
+def test_queued_task_missing_inputs_are_elicited_without_reconsent(
+    runtime_factory,
+):
+    runtime = runtime_factory(provider=_QueuedHistoryRecoveryProvider())
+
+    first = runtime.chat(
+        "queued-history",
+        "Check checking 1001, then transfer $50 from savings 2003 to checking 1002",
+    )
+
+    assert "$2,450.75" in first.text
+    assert "Would you like me to continue" not in first.text
+    assert "Which account should the money come from" in first.text
+    active = runtime.inspect_state("queued-history")["active_task"]
+    assert active["skill_name"] == "internal_transfer"
+    assert active["inputs"] == {}
+
+    runtime.chat("queued-history", "savings 2003")
+    runtime.chat("queued-history", "checking 1002")
+    review = runtime.chat("queued-history", "$50")
+
+    assert "Review mock transfer: $50.00" in review.text
+    assert "Savings ending in 2003" in review.text
+    assert "Checking ending in 1002" in review.text
+    assert "Which account should" not in review.text
+
+
+def test_member_can_decline_consequential_confirmation_after_automatic_transition(
+    runtime_factory,
+):
     runtime = runtime_factory()
     first = runtime.chat(
-        "multi-decline", "Check my checking balance and transfer $25 to savings"
+        "multi-decline",
+        "Check my chk-001 balance and transfer $25 from chk-002 to sav-001",
     )
     assert "$2,450.75" in first.text
-    assert "Would you like me to continue" in first.text
+    assert "Would you like me to continue" not in first.text
+    assert "Review mock transfer" in first.text
 
     declined = runtime.chat("multi-decline", "no")
 
-    assert "won't continue" in declined.text
+    assert "Transfer cancelled" in declined.text
     state = runtime.inspect_state("multi-decline")
     assert state["active_task"] is None
     assert state["queued_tasks"] == []
@@ -336,21 +650,19 @@ def test_member_can_decline_the_next_planned_goal(runtime_factory):
     assert runtime.tools.transfers.submission_count == 0
 
 
-def test_planned_goal_transition_survives_restart(runtime_factory):
+def test_automatically_advanced_goal_confirmation_survives_restart(runtime_factory):
     first_runtime = runtime_factory(db_name="planned-transition.db")
     first_runtime.chat(
         "multi-durable",
-        "Check my checking balance and transfer $25 from checking to savings",
+        "Transfer $25 from chk-002 to sav-001 and check my chk-001 balance",
     )
     first_runtime.close()
 
     second_runtime = runtime_factory(db_name="planned-transition.db")
     continued = second_runtime.chat("multi-durable", "yes")
 
-    assert "Review mock transfer" in continued.text
-    assert second_runtime.inspect_state("multi-durable")["active_task"][
-        "skill_name"
-    ] == "internal_transfer"
+    assert "Mock transfer completed" in continued.text
+    assert second_runtime.inspect_state("multi-durable")["active_task"] is None
 
 
 def test_live_agent_handoff(runtime_factory):
@@ -593,10 +905,10 @@ def test_installed_skill_is_not_reported_as_a_gap(runtime_factory):
     )
 
 
-def test_display_name_goal_is_canonicalized_without_false_clarification(
+def test_installed_skill_match_routes_without_provider_goal_identifier(
     runtime_factory,
 ):
-    runtime = runtime_factory(provider=_DisplayNameGoalProvider())
+    runtime = runtime_factory(provider=_UnknownSkillProvider())
     runtime.catalog.install(
         PROJECT_ROOT
         / "skills"
@@ -613,7 +925,7 @@ def test_display_name_goal_is_canonicalized_without_false_clarification(
 
 
 def test_persisted_duplicate_goal_clarification_recovers_on_yes(runtime_factory):
-    runtime = runtime_factory(provider=_DisplayNameGoalProvider())
+    runtime = runtime_factory(provider=_UnknownSkillProvider())
     runtime.catalog.install(
         PROJECT_ROOT
         / "skills"
@@ -693,6 +1005,30 @@ def test_ambiguous_goals_are_clarified_and_answer_is_durable(runtime_factory):
     assert second_runtime.inspect_state("ambiguous")["selected_skill"] == "guided_balance"
 
 
+def test_ambiguous_goal_reply_can_select_both_requests_in_order(runtime_factory):
+    runtime = runtime_factory()
+
+    runtime.chat("ambiguous-both", "balance transfer")
+    reply = runtime.chat("ambiguous-both", "both")
+
+    assert "I'll start by helping you check an account balance" in reply.text
+    state = runtime.inspect_state("ambiguous-both")
+    assert state["active_task"]["skill_name"] == "guided_balance"
+    assert state["queued_tasks"][0]["skill_name"] == "internal_transfer"
+
+
+def test_ambiguous_goal_reply_can_state_an_ordered_plan(runtime_factory):
+    runtime = runtime_factory()
+
+    runtime.chat("ambiguous-ordered", "balance transfer")
+    reply = runtime.chat("ambiguous-ordered", "I want to do balance then transfer")
+
+    assert "I'll start by helping you check an account balance" in reply.text
+    assert runtime.inspect_state("ambiguous-ordered")["queued_tasks"][0][
+        "skill_name"
+    ] == "internal_transfer"
+
+
 def test_natural_slot_answers_continue_transfer_without_reclassifying(runtime_factory):
     runtime = runtime_factory()
 
@@ -719,12 +1055,14 @@ def test_semantic_turn_understanding_collects_multiple_slots_and_word_amount(
     source = runtime.chat("semantic-slots", "I want to make a transfer")
     assert "money come from" in source.text
 
-    accounts = runtime.chat("semantic-slots", "from saving to checking")
+    accounts = runtime.chat(
+        "semantic-slots", "from savings 2002 to checking 1001"
+    )
     assert "How much" in accounts.text
     assert "source account and destination account" in accounts.text
     state = runtime.inspect_state("semantic-slots")
-    assert state["active_task"]["inputs"]["source_account"] == "savings"
-    assert state["active_task"]["inputs"]["destination_account"] == "checking"
+    assert state["active_task"]["inputs"]["source_account"] == "savings 2002"
+    assert state["active_task"]["inputs"]["destination_account"] == "checking 1001"
     assert state["no_goal_turn_count"] == 0
 
     review = runtime.chat("semantic-slots", "two hundred")
@@ -739,7 +1077,9 @@ def test_semantic_turn_understanding_normalizes_disfluent_word_amount(
 ):
     runtime = runtime_factory(provider=_NaturalTurnProvider())
     runtime.chat("semantic-disfluency", "I want to make a transfer")
-    runtime.chat("semantic-disfluency", "from saving to checking")
+    runtime.chat(
+        "semantic-disfluency", "from savings 2002 to checking 1001"
+    )
 
     review = runtime.chat("semantic-disfluency", "one hundreds dollar")
 
@@ -752,8 +1092,8 @@ def test_uninterpreted_word_amount_is_reelicited_not_reported_as_over_limit(
 ):
     runtime = runtime_factory()
     runtime.chat("amount-retry", "I want to make a transfer")
-    runtime.chat("amount-retry", "checking")
-    runtime.chat("amount-retry", "saving")
+    runtime.chat("amount-retry", "checking 1001")
+    runtime.chat("amount-retry", "saving 2002")
 
     retry = runtime.chat("amount-retry", "one hundreds dollar")
 
@@ -765,7 +1105,7 @@ def test_uninterpreted_word_amount_is_reelicited_not_reported_as_over_limit(
 def test_semantic_correction_revalidates_and_replaces_confirmation(runtime_factory):
     runtime = runtime_factory(provider=_NaturalTurnProvider())
     first_review = runtime.chat(
-        "semantic-correction", "Transfer $50 from checking to savings"
+        "semantic-correction", "Transfer $50 from chk-001 to sav-001"
     )
     assert "$50.00" in first_review.text
 
@@ -789,13 +1129,15 @@ def test_semantic_understanding_continues_an_inflight_deactivated_version(
     runtime.chat("semantic-pinned", "I want to make a transfer")
     runtime.catalog.deactivate("internal_transfer")
 
-    reply = runtime.chat("semantic-pinned", "from saving to checking")
+    reply = runtime.chat(
+        "semantic-pinned", "from savings 2002 to checking 1001"
+    )
 
     assert "How much" in reply.text
     state = runtime.inspect_state("semantic-pinned")
-    assert state["active_task"]["skill_version"] == "2.0.0"
-    assert state["active_task"]["inputs"]["source_account"] == "savings"
-    assert state["active_task"]["inputs"]["destination_account"] == "checking"
+    assert state["active_task"]["skill_version"] == "2.1.0"
+    assert state["active_task"]["inputs"]["source_account"] == "savings 2002"
+    assert state["active_task"]["inputs"]["destination_account"] == "checking 1001"
 
 
 def test_low_confidence_account_suffix_is_not_accepted_as_amount(runtime_factory):
@@ -806,7 +1148,10 @@ def test_low_confidence_account_suffix_is_not_accepted_as_amount(runtime_factory
 
     assert "receive the money" in reply.text
     state = runtime.inspect_state("semantic-confidence")
-    assert state["active_task"]["inputs"]["source_account"] == "checking"
+    assert (
+        state["active_task"]["inputs"]["source_account"]
+        == "checking ending in 1001"
+    )
     assert "amount" not in state["active_task"]["inputs"]
 
 
@@ -814,10 +1159,12 @@ def test_clear_new_goal_interrupts_slot_collection_then_offers_resume(runtime_fa
     runtime = runtime_factory()
     runtime.chat("context-switch", "I want to make a transfer")
 
-    balance = runtime.chat("context-switch", "What is my checking balance?")
+    balance = runtime.chat("context-switch", "What is my checking 1001 balance?")
 
     assert "$2,450.75" in balance.text
     assert "resume or discard" in balance.text
+    assert "make an internal transfer" in balance.text
+    assert "internal_transfer" not in balance.text
     state = runtime.inspect_state("context-switch")
     assert state["paused_tasks"][0]["skill_name"] == "internal_transfer"
 

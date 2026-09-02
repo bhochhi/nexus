@@ -5,7 +5,7 @@ import re
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from member_assistant.catalog import SkillRoutingDefinition
-from .base import GoalMatch, ModelProvider, ProviderError, TurnAnalysis
+from .base import SkillMatch, ModelProvider, ProviderError, TurnAnalysis
 from .turn_contract import (
     TURN_UNDERSTANDING_INSTRUCTION,
     parse_turn_analysis,
@@ -18,6 +18,8 @@ _SAFETY_STOP_REASONS = {"guardrail_intervened", "content_filtered"}
 
 class BedrockProvider(ModelProvider):
     """Use Bedrock Converse for both Amazon Nova and Bedrock-hosted OpenAI models."""
+
+    semantic_turn_understanding = True
 
     def __init__(
         self,
@@ -88,6 +90,7 @@ class BedrockProvider(ModelProvider):
             "provider": self.name,
             "model": self.model_id,
             "api_endpoint": "converse",
+            "understanding_mode": "semantic",
             "aws_region": self._region,
             "guardrail_enabled": bool(self._guardrail_id),
             "guardrail_id": self._guardrail_id,
@@ -207,13 +210,13 @@ class BedrockProvider(ModelProvider):
                 raise
             raise self._safe_provider_error(operation, exc) from exc
 
-    def identify_goals(
+    def identify_skills(
         self,
         message: str,
         catalog: Sequence[SkillRoutingDefinition],
         context: Optional[Mapping[str, Any]] = None,
-    ) -> List[GoalMatch]:
-        return self.understand_turn(message, catalog, context).goals
+    ) -> List[SkillMatch]:
+        return self.understand_turn(message, catalog, context).skill_matches
 
     def understand_turn(
         self,

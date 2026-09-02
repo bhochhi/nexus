@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from member_assistant.catalog import SkillRoutingDefinition
 from member_assistant.config import Settings
-from .base import GoalMatch, ModelProvider, ProviderError, TurnAnalysis
+from .base import SkillMatch, ModelProvider, ProviderError, TurnAnalysis
 from .deterministic import DeterministicProvider
 
 
@@ -26,20 +26,20 @@ class FallbackProvider(ModelProvider):
             **exc.error_metadata(),
         }
 
-    def identify_goals(
+    def identify_skills(
         self,
         message: str,
         catalog: Sequence[SkillRoutingDefinition],
         context: Optional[Mapping[str, Any]] = None,
-    ) -> List[GoalMatch]:
+    ) -> List[SkillMatch]:
         try:
-            result = self.primary.identify_goals(message, catalog, context)
+            result = self.primary.identify_skills(message, catalog, context)
             self._last_call_metadata = self.primary.observability_metadata()
             return result
         except ProviderError as exc:
             if not exc.fallback_allowed:
                 raise
-            result = self.fallback.identify_goals(message, catalog, context)
+            result = self.fallback.identify_skills(message, catalog, context)
             self._last_call_metadata = {
                 **self.fallback.observability_metadata(),
                 "fallback_used": True,

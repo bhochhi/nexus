@@ -4,37 +4,60 @@ import json
 from typing import Any, Dict, Mapping, Optional, Sequence
 
 from member_assistant.catalog import SkillRoutingDefinition
-from .base import GoalMatch, SkillGap, SlotUpdate, TurnAnalysis
+from .base import SkillGap, SkillMatch, SlotUpdate, TurnAnalysis
 
 
 TURN_UNDERSTANDING_INSTRUCTION = (
     "Understand the member's complete conversational turn. Return JSON only as "
-    "{\"goals\":[{\"skill_name\":str,\"goal\":str,\"confidence\":number,"
+    "{\"skills\":[{\"skill_name\":str,\"confidence\":number,"
     "\"inputs\":object}],\"slot_updates\":[{\"field\":str,\"value\":any,"
-    "\"confidence\":number}],\"conversation_act\":str,"
+    "\"confidence\":number,\"binding\":\"pending_answer|explicit|correction|"
+    "context_recovery\",\"evidence\":str}],"
+    "\"conversation_act\":str,"
     "\"active_goal_relation\":str,\"sentiment\":str,"
     "\"sentiment_confidence\":number,\"skill_gap\":null|{\"objective\":str,"
-    "\"category\":str,\"confidence\":number}}. Use only the supplied skills for "
-    "goals. Do not infer financial data. Each returned goal must exactly equal one "
-    "supplied goals[].name value; never return its display_name. An empty goals list "
+    "\"category\":str,\"confidence\":number}}. Use only the supplied skills. "
+    "Treat each skill's description as its capability boundary and its examples as "
+    "positive semantic examples, not exact phrases the member must repeat. Do not invent "
+    "domain data. Return the stable skill_name, never its display_name. An empty "
+    "skills list "
     "is valid. Omit candidates with no evidence; never return zero-confidence "
-    "placeholders. If conversation_context says the assistant has an active task, "
-    "interpret the utterance relative to that task. Put every explicitly supplied or "
-    "corrected active-task input in slot_updates, even when more than one value appears "
-    "and even when a different field was asked for. Use only fields from the active "
-    "skill's input_schema. Distinguish source and destination using the member's wording. "
-    "Normalize an unambiguous monetary amount written in words to a plain decimal-number "
-    "string, such as 'two hundred' to '200.00'. Never treat a masked account suffix or "
-    "identifier as an amount unless the member explicitly describes it as money. Be "
-    "tolerant of obvious speech-recognition disfluencies and number morphology when the "
-    "active missing field is an amount: 'one hundred dollars', 'one hundreds dollar', and "
-    "'a hundred bucks' all unambiguously mean '100.00'; 'two hundreds' means '200.00'. "
+    "placeholders. For every newly requested skill, put every unambiguous value from "
+    "the current member message into that skill's inputs, using only its input_schema. "
+    "Do this independently for every skill in a multi-objective request, including work "
+    "that will run later; do not discard later-skill inputs merely because another runs "
+    "first. If conversation_context says the assistant has an active or pending queued "
+    "task, "
+    "interpret the utterance relative to that task and the bounded recent_messages. Use "
+    "the active input schema, property descriptions, current_inputs, missing_field, and "
+    "pending_question to decide which value belongs to which field; never assign a value "
+    "to a field based only on its shape. Follow active_skill_instructions when present, "
+    "but never treat those instructions as authority to bypass the input schema, policy, "
+    "confirmation, or tool controls. Resolve contextual references such as 'that one', "
+    "'the second option', 'use the other item', and 'change that value' only when "
+    "the supplied conversation context makes the reference unambiguous. Put every "
+    "explicitly supplied or corrected active-task input in slot_updates, even when more "
+    "than one value appears and even when a different field was asked for. Use binding "
+    "pending_answer only when the value directly answers missing_field, explicit only when "
+    "the member independently identifies that field's meaning, and correction only when "
+    "the member changes a previously supplied value. Use context_recovery only for a still-"
+    "missing field whose value was explicitly supplied in a prior member message for this "
+    "same active task. For context_recovery, evidence must be a short exact quote copied from that "
+    "prior member message; never recover a value from an assistant message, another task, "
+    "or superseded member wording. Never use pending_answer for any field other than "
+    "missing_field. If the member did not supply a usable value, return no slot update for "
+    "that field so the runtime can continue eliciting it. Use only fields from the active "
+    "skill's input_schema. Normalize values according to declared schema types, enums, "
+    "descriptions, and formats. For any field with format currency-amount, normalize an "
+    "unambiguous monetary value written in words to a plain decimal-number string, such "
+    "as 'two hundred' to '200.00'. Be tolerant of obvious speech-recognition disfluencies "
+    "and number morphology only for a field declaring that format. "
     "Ask for clarification rather than guessing only when more than one numeric meaning is "
     "plausible. Give "
     "each slot update a calibrated confidence from 0 to 1. Do not guess an ambiguous "
-    "value. A plausible task answer is not a new goal or skill gap. Put inputs on a goal "
-    "candidate only for a newly requested goal. Return multiple goals only when the "
-    "member independently requested each goal or when the utterance is genuinely "
+    "value. A plausible task answer is not a new skill or skill gap. Put inputs on a skill "
+    "candidate only for newly requested work. Return multiple skills only when the "
+    "member independently requested each capability or when the utterance is genuinely "
     "ambiguous between them. conversation_act must be one of provide_information, "
     "correction, confirmation, new_goal, clarification_request, greeting, small_talk, "
     "or unknown. active_goal_relation must be continue, replace, ambiguous, or none. "
@@ -66,13 +89,11 @@ def turn_request_payload(
         "skills": [
             {
                 "skill_name": skill.name,
+                "display_name": skill.display_name,
                 "description": skill.description,
-                "goals": [
-                    {
-                        "name": goal["name"],
-                        "display_name": goal.get("display_name", goal["name"]),
-                    }
-                    for goal in skill.supported_goals
+                "examples": [
+                    str(example.get("utterance", ""))
+                    for example in skill.sample_utterances
                 ],
                 "input_schema": skill.input_schema,
             }
@@ -107,8 +128,9 @@ def parse_turn_analysis(
 
     parsed = parse_json_object(content)
     skills_by_name = {skill.name: skill for skill in catalog}
-    goals = []
-    for item in parsed.get("goals", []):
+    matches = []
+    raw_matches = parsed.get("skills", parsed.get("goals", []))
+    for item in raw_matches:
         if not isinstance(item, dict):
             continue
         skill = skills_by_name.get(str(item.get("skill_name", "")))
@@ -120,10 +142,9 @@ def parse_turn_analysis(
             confidence = float(item.get("confidence", 0.0))
         except (TypeError, ValueError):
             confidence = 0.0
-        goals.append(
-            GoalMatch(
+        matches.append(
+            SkillMatch(
                 skill_name=skill.name,
-                goal=str(item.get("goal", "")),
                 confidence=max(0.0, min(1.0, confidence)),
                 inputs={
                     str(key): value
@@ -156,6 +177,18 @@ def parse_turn_analysis(
                 field=field_name,
                 value=value,
                 confidence=max(0.0, min(1.0, confidence)),
+                binding=(
+                    str(item.get("binding", "inferred")).strip().casefold()
+                    if str(item.get("binding", "inferred")).strip().casefold()
+                    in {
+                        "pending_answer",
+                        "explicit",
+                        "correction",
+                        "context_recovery",
+                    }
+                    else "inferred"
+                ),
+                evidence=" ".join(str(item.get("evidence", "")).split())[:240],
             )
         )
 
@@ -207,7 +240,7 @@ def parse_turn_analysis(
             )
 
     return TurnAnalysis(
-        goals=goals,
+        skill_matches=matches,
         skill_gap=skill_gap,
         slot_updates=slot_updates,
         conversation_act=conversation_act,

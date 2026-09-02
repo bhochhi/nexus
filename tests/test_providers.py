@@ -47,7 +47,7 @@ def test_openai_analysis_uses_responses_api_and_returns_skill_gap(runtime_factor
     responses = _FakeResponses(
         json.dumps(
             {
-                "goals": [],
+                "skills": [],
                 "skill_gap": {
                     "objective": "recover your online ID",
                     "category": "online_id_recovery",
@@ -76,9 +76,13 @@ def test_openai_analysis_uses_responses_api_and_returns_skill_gap(runtime_factor
     assert json.loads(request["input"])["output_requirement"] == (
         "Return valid JSON only."
     )
-    supplied_goal = json.loads(request["input"])["skills"][0]["goals"][0]
-    assert set(supplied_goal) == {"name", "display_name"}
-    assert "never return its display_name" in request["instructions"]
+    supplied_skill = json.loads(request["input"])["skills"][0]
+    assert supplied_skill["skill_name"] == "approved_knowledge"
+    assert supplied_skill["display_name"] == "ask an account-policy question"
+    assert supplied_skill["examples"]
+    assert "goals" not in supplied_skill
+    assert "tools" not in supplied_skill
+    assert "never its display_name" in request["instructions"]
     assert "temperature" not in request
     assert "messages" not in request
     metadata = provider.observability_metadata()
@@ -108,12 +112,12 @@ def test_openai_understands_multiple_active_task_slots(runtime_factory):
     responses = _FakeResponses(
         json.dumps(
             {
-                "goals": [],
+                "skills": [],
                 "slot_updates": [
-                    {"field": "source_account", "value": "savings", "confidence": 0.98},
-                    {"field": "destination_account", "value": "checking", "confidence": 0.97},
-                    {"field": "amount", "value": "200.00", "confidence": 0.99},
-                    {"field": "undeclared", "value": "ignored", "confidence": 1.0},
+                    {"field": "source_account", "value": "savings", "confidence": 0.98, "binding": "pending_answer"},
+                    {"field": "destination_account", "value": "checking", "confidence": 0.97, "binding": "explicit"},
+                    {"field": "amount", "value": "200.00", "confidence": 0.99, "binding": "explicit"},
+                    {"field": "undeclared", "value": "ignored", "confidence": 1.0, "binding": "explicit"},
                 ],
                 "conversation_act": "provide_information",
                 "active_goal_relation": "continue",
@@ -141,10 +145,15 @@ def test_openai_understands_multiple_active_task_slots(runtime_factory):
     ]
     assert analysis.conversation_act == "provide_information"
     assert analysis.active_goal_relation == "continue"
+    assert [item.binding for item in analysis.slot_updates] == [
+        "pending_answer",
+        "explicit",
+        "explicit",
+    ]
     request = responses.requests[0]
     assert "every explicitly supplied or corrected" in request["instructions"]
     assert "two hundred" in request["instructions"]
-    assert "one hundreds dollar" in request["instructions"]
+    assert "format currency-amount" in request["instructions"]
 
 
 def test_non_reasoning_openai_model_omits_reasoning_parameter():

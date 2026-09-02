@@ -134,34 +134,9 @@ class DeclarativeSkillExecutor(SkillExecutor):
                 metadata={"tool_status": "success"},
         )
         if not result and step.get("on_empty"):
-            failure = dict(step["on_empty"])
-            ambiguity_template = failure.get("ambiguous_choice_template")
-            if ambiguity_template:
-                reference = str(arguments.get("reference", "")).casefold()
-                tokens = set(re.findall(r"[a-z]+", reference))
-                if "saving" in tokens:
-                    tokens.add("savings")
-                account_types = tokens.intersection({"checking", "savings"})
-                if len(account_types) == 1:
-                    account_type = next(iter(account_types))
-                    eligible = context.tools.invoke(
-                        "mock_accounts",
-                        "list_eligible_balances",
-                        {"member_ref": context.member_ref},
-                    )
-                    choices = [
-                        item
-                        for item in eligible
-                        if item.get("account_type") == account_type
-                    ]
-                    if len(choices) > 1:
-                        failure["response"] = str(ambiguity_template).format(
-                            account_type=account_type,
-                            choices="; ".join(
-                                str(item["label"]) for item in choices
-                            ),
-                        )
-            return self._configured_failure(failure, task, completed_steps)
+            return self._configured_failure(
+                dict(step["on_empty"]), task, completed_steps
+            )
         if step.get("save_as"):
             variables[step["save_as"]] = result
         self._complete_step(step, completed_steps)
@@ -186,11 +161,18 @@ class DeclarativeSkillExecutor(SkillExecutor):
         if not selected_value and len(collection) <= threshold:
             selected = list(collection)
         elif not selected_value:
-            question = self._selection_question(step, collection, invalid=False)
+            question = self._selection_question(
+                step, collection, invalid=False, selected_value=""
+            )
             return self._awaiting_input(task, field_name, question, completed_steps)
         else:
+            scored = [
+                (self._match_score(item, selected_value, step), item)
+                for item in collection
+            ]
+            best_score = max((score for score, _ in scored), default=0)
             selected = [
-                item for item in collection if self._matches(item, selected_value, step)
+                item for score, item in scored if score == best_score and score > 0
             ]
             if not selected:
                 task["inputs"].pop(field_name, None)
@@ -198,9 +180,23 @@ class DeclarativeSkillExecutor(SkillExecutor):
                 # after this exact field was explicitly elicited from the member.
                 was_explicit_slot_answer = task.get("missing_field") == field_name
                 question = self._selection_question(
-                    step, collection, invalid=was_explicit_slot_answer
+                    step,
+                    collection,
+                    invalid=was_explicit_slot_answer,
+                    selected_value=selected_value,
                 )
                 return self._awaiting_input(task, field_name, question, completed_steps)
+
+        if step.get("require_single", False) and len(selected) != 1:
+            task["inputs"].pop(field_name, None)
+            question = self._selection_question(
+                step,
+                selected,
+                invalid=False,
+                selected_value=selected_value,
+                ambiguous=True,
+            )
+            return self._awaiting_input(task, field_name, question, completed_steps)
 
         variables[step["save_as"]] = selected
         self._complete_step(step, completed_steps)
@@ -396,6 +392,8 @@ class DeclarativeSkillExecutor(SkillExecutor):
         step: Mapping[str, Any],
         collection: Iterable[Mapping[str, Any]],
         invalid: bool,
+        selected_value: str,
+        ambiguous: bool = False,
     ) -> str:
         choices_collection = list(collection)
         distinct_by = step.get("choice_distinct_by")
@@ -411,14 +409,21 @@ class DeclarativeSkillExecutor(SkillExecutor):
             step["choice_template"].format(**item) for item in choices_collection
         )
         prefix = step.get("invalid_prefix", "") if invalid else ""
-        return prefix + step["prompt_template"].format(choices=choices)
+        template = (
+            step.get("ambiguous_prompt_template", step["prompt_template"])
+            if ambiguous
+            else step["prompt_template"]
+        )
+        return prefix + str(template).format(
+            choices=choices, selection=selected_value
+        )
 
     @staticmethod
-    def _matches(item: Mapping[str, Any], selected_value: str, step: Mapping[str, Any]) -> bool:
+    def _match_score(
+        item: Mapping[str, Any], selected_value: str, step: Mapping[str, Any]
+    ) -> int:
         normalized = " ".join(re.findall(r"[a-z0-9]+", selected_value.casefold()))
         selected_tokens = set(normalized.split())
-        if "saving" in selected_tokens:
-            selected_tokens.add("savings")
         candidates: List[str] = []
         for field_name in step.get("match_fields", []):
             value = item.get(field_name)
@@ -426,16 +431,17 @@ class DeclarativeSkillExecutor(SkillExecutor):
                 candidates.extend(str(candidate) for candidate in value)
             elif value is not None:
                 candidates.append(str(value))
-        for candidate in candidates:
+        covered_tokens = set()
+        for candidate in set(candidates):
             normalized_candidate = " ".join(
                 re.findall(r"[a-z0-9]+", candidate.casefold())
             )
             if normalized == normalized_candidate:
-                return True
+                return 100 + len(selected_tokens)
             candidate_tokens = set(normalized_candidate.split())
             if candidate_tokens and candidate_tokens.issubset(selected_tokens):
-                return True
-        return False
+                covered_tokens.update(candidate_tokens)
+        return len(covered_tokens)
 
     def _render(
         self,
@@ -481,6 +487,7 @@ class DeclarativeSkillExecutor(SkillExecutor):
                 "member_ref": context.member_ref,
                 "session_id": context.session_id,
                 "member_profile": context.member_profile,
+                **context.execution_context,
             },
         }
         parts = reference[1:].split(".")
