@@ -29,6 +29,11 @@ See `SCHEMA.md` for artifact authority, required fields, naming, references,
 lifecycle, and the distinction between foundations, features, capabilities,
 runtime skills, contracts, and change evidence.
 
+The current baseline is authoritative for covered intent but is not yet
+certified to reproduce the complete application from specifications alone. See
+`docs/specification-baseline-and-rebuild-readiness.md` for the precise claim,
+known gaps, and certification gate.
+
 Validate the portable artifacts with:
 
 ```bash
@@ -49,3 +54,5 @@ it is capability-only, needs a connector extension, or depends on a platform
 extension. Local composition, repository strategy, environment isolation,
 JFrog publication, catalog assignment, and hot reload are documented in
 `docs/capability-development-and-release-environments.md`.
+Practical Codex, GitHub Copilot, Claude Code, and cross-agent usage is documented
+in `docs/development-agent-workflow-guide.md`.

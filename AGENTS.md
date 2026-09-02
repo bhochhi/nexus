@@ -22,3 +22,5 @@ The constitution, specifications, contracts, and portable workflow skills are
 authoritative. This file only makes them discoverable to Codex. Do not edit an
 immutable `skills/catalog/<name>/<version>/SKILL.md`; develop the next candidate
 in its `specifications/capabilities/<name>/` package.
+Use `docs/development-agent-workflow-guide.md` for practical stage execution,
+worktree validation, and cross-agent handoff.

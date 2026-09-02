@@ -4,6 +4,12 @@ The specification system separates durable intent from implementation and
 generated evidence. Platform artifacts use domain-neutral nouns; concrete
 skill names belong only in capability packages and implementation traceability.
 
+The specifications are normative for behavior within their stated scope. That
+authority does not by itself mean the complete application can be reproduced
+from specifications alone. The current baseline classification, known gaps,
+required portable package, and clean-room certification gate are documented in
+`docs/specification-baseline-and-rebuild-readiness.md`.
+
 ## Authority layers
 
 1. `constitution.md` — governing principles and precedence.

@@ -9,3 +9,5 @@ The portable workflow and specifications are authoritative; this Copilot file
 does not redefine them. Do not edit immutable published catalog skills. Build
 candidate skills in `specifications/capabilities/<name>/` and preserve stable
 acceptance traceability.
+Use `docs/development-agent-workflow-guide.md` for practical stage execution,
+worktree validation, and cross-agent handoff.

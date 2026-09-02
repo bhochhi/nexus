@@ -8,3 +8,5 @@ then follow the corresponding portable stage skill.
 This file is a thin Claude Code adapter. The portable specifications and
 workflow skills are the source of truth. Never edit an immutable published
 catalog skill; develop a traced candidate in its capability package.
+Use `docs/development-agent-workflow-guide.md` for practical stage execution,
+worktree validation, and cross-agent handoff.

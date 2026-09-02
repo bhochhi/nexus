@@ -62,6 +62,25 @@ The portable agent entrypoint is
 `workflow/skills/nexus-spec-driven-development/SKILL.md`; its eight stage skills
 contain the detailed operating instructions. `AGENTS.md`,
 `.github/copilot-instructions.md`, and `CLAUDE.md` are thin discovery adapters.
+See `docs/development-agent-workflow-guide.md` for practical startup prompts,
+stage selection, worktree usage, validation, and cross-agent handoff.
+
+## Baseline authority and rebuild readiness
+
+Portable specifications are normative for behavior within their approved
+scope. This means an implementation conflict is resolved by correcting the
+implementation or deliberately revising the governing specification. It does
+not mean every detail required to reproduce the present application is already
+specified.
+
+The current v0.1 candidate is an architecture and capability baseline, not a
+clean-room rebuild certification. Transport, persistence, complete state-machine,
+catalog/compiler, provider, UI, configuration, deployment, and conformance
+details still require further specification before an independent agent can be
+expected to reproduce equivalent observable behavior from the portable package
+alone. The exact readiness model, gaps, required package, and certification
+exercise are defined in
+`docs/specification-baseline-and-rebuild-readiness.md`.
 
 ## Mandatory platform-impact decision
 
