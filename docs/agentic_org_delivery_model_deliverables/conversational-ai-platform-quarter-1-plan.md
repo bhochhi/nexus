@@ -137,6 +137,47 @@ Practical team size is approximately 8-11 delivery FTE plus committed product/SM
 - Security/risk control owner with approval authority.
 - Release/operations owner and incident commander role.
 
+### 5.2 Paired Business-IT capability delivery model
+
+Quarter one uses a paired Business-IT capability delivery model. The business capability owner and an IT capability engineer work together from intake through production learning. This avoids two weak operating patterns: expecting business users to become repository developers, or asking IT to translate business intent alone and seek approval only after implementation.
+
+Business ownership means accountability for the member outcome and capability behavior. It does not require business users to work in VS Code, use Copilot, write YAML, or operate Git. During quarter one, the IT capability engineer operates the repository and AI development workflow. Business participants review plain-language specifications, example conversations, preview behavior, and evaluation results.
+
+| Artifact or decision | Business responsibility | IT responsibility | AI development workflow contribution |
+|---|---|---|---|
+| Member outcome and supported scope | Accountable; defines value, users, supported requests, and exclusions | Challenges ambiguity and identifies feasibility constraints | Structures the intake and identifies missing decisions |
+| Examples, business rules, and disclosures | Authors and approves representative behavior | Maps requirements to platform contracts, tools, and controls | Generates variants and checks coverage |
+| Acceptance criteria | Co-owns expected behavior and success thresholds | Co-owns executable precision and verification design | Normalizes stable acceptance IDs and creates traceability |
+| `CAPABILITY.md` | Approves business meaning | Technical co-author and repository owner | Drafts, analyzes, and validates the specification |
+| `SKILL.md`, tools, and platform dependencies | Approves member-visible behavior | Accountable for implementation and technical correctness | Generates or updates the candidate skill, tests, and impact analysis |
+| Evaluation scenarios and release decision | Approves expected outcomes and business readiness | Implements the harness and supplies technical release evidence | Expands scenarios, executes evaluations, and assembles evidence |
+
+Business begins with a short capability intent and acceptance template rather than the full technical `CAPABILITY.md` template. The intake records:
+
+- the member outcome and intended users;
+- supported questions or actions and explicit exclusions;
+- approved information sources, business rules, and disclosures;
+- successful, ambiguous, unsupported, unsafe, and failure examples;
+- expected clarification, response, navigation, or handoff behavior;
+- measurable business and quality outcomes; and
+- the accountable business owner and required approvers.
+
+The paired workflow is:
+
+```text
+Business capability intake
+  -> paired Business-IT specification workshop
+  -> AI-assisted CAPABILITY.md and acceptance-scenario draft
+  -> business behavior approval and IT dependency approval
+  -> AI-assisted SKILL.md, tests, and evaluations
+  -> isolated preview and evidence review
+  -> business acceptance and controlled publication
+```
+
+`CAPABILITY.md` remains the authoritative statement of business intent. `SKILL.md` is the executable implementation of that approved intent. The AI workflow may draft and validate both artifacts, but it cannot approve business meaning, control requirements, or production activation.
+
+The quarter-one process should capture rework, unresolved decisions, review time, and evaluation findings. Those observations become requirements for a future Business Capability Studio where authorized business users can edit intent and scenarios, preview conversations, review evaluation evidence, and request publication without using developer tools. Self-service should begin with low-risk declarative changes; new tools, sensitive data, platform extensions, and consequential actions continue to require engineering and control review.
+
 ## 6. Twelve-week delivery roadmap
 
 ### Weeks 1-2: Align, specify, and walk the skeleton
@@ -144,6 +185,7 @@ Practical team size is approximately 8-11 delivery FTE plus committed product/SM
 **Business and specs**
 
 - define outcome, users, funded boundary, happy path, exclusions, service levels, and handoff;
+- assign the Business-IT capability pair and complete the capability intent and acceptance intake;
 - write conversation scenarios including corrections, ambiguity, interruption, failure, and unsafe requests;
 - define capability, state, tool, response, and policy contracts required for the slice;
 - classify risk and name policy/control owners.
@@ -473,6 +515,7 @@ Quarter-one success is consistent artifact flow and traceability, not maximum ag
 ### 16.3 Delivery system
 
 - specifications and governance are separate, linked, versioned, and consumed by checks;
+- the paired Business-IT workflow produces a business-approved `CAPABILITY.md`, traced acceptance scenarios, and an implementation-ready candidate skill without requiring business users to operate developer tools;
 - path-aware platform and capability lanes run in GitLab;
 - risk-based test/evaluation/security/policy gates block unsafe promotion;
 - release evidence identifies every runtime, capability, provider/model, prompt, policy, and dataset version;
@@ -496,7 +539,7 @@ Review weekly with the sponsor.
 ## 18. Sponsor decisions required in week one
 
 1. Confirm the funded capability, users, production-readiness target, and excluded use cases.
-2. Name product/SME, business capability, risk/control, and release owners with decision SLAs.
+2. Name the business capability owner and paired IT capability engineer, plus product/SME, risk/control, and release owners with decision SLAs.
 3. Confirm required enterprise integrations, data classes, test data, and environment availability.
 4. Confirm the initial inference path and approval to use OpenAI through the provider abstraction.
 5. Approve the proposed capacity or explicitly accept the scope/timeline tradeoff.
